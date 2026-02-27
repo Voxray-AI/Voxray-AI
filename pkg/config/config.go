@@ -7,8 +7,13 @@ import (
 	"os"
 )
 
-// Config holds the server configuration, typically loaded from a JSON file.
-// Provider is the default for all tasks (STT, LLM, TTS); per-task providers override when set.
+// Config holds the server configuration, typically loaded from a JSON file or environment.
+// It aligns with the Pipecat Python settings concept (see pipecat/services/settings.py): provider
+// and model per task, with optional stt_model, tts_model, tts_voice. API keys are resolved via
+// APIKeys map or environment (e.g. OPENAI_API_KEY, GROQ_API_KEY). Use GetAPIKey(service, envVar)
+// for provider-specific lookup; the services factory uses this for construction.
+//
+// Provider is the default for all tasks (STT, LLM, TTS); stt_provider, llm_provider, tts_provider override when set.
 // Model is the chat/LLM model; stt_model, tts_model, tts_voice are task-specific and optional.
 type Config struct {
 	Host        string            `json:"host"`

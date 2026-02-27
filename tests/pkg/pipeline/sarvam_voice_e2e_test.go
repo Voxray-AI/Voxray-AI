@@ -2,7 +2,6 @@ package pipeline_test
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"voila-go/pkg/config"
 	"voila-go/pkg/frames"
 	"voila-go/pkg/pipeline"
+	"voila-go/pkg/processors/voice"
 	"voila-go/pkg/services"
 )
 
