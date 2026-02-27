@@ -1,0 +1,16 @@
+{
+    "host": "localhost",
+    "port": 8080,
+    "model": "llama-3.1-8b-instant",
+    "provider": "groq",
+    "plugins": [
+        "echo"
+    ],
+    "api_keys": {
+        "openai": "",
+        "deepgram": "",
+        "cartesia": "",
+        "daily_room_url": "",
+        "groq": "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"
+    }
+}

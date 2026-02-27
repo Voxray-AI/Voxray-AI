@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+option go_package = "voila-go/pkg/frames/proto";
+
+// FrameEnvelope wraps a frame with type discriminator and payload (JSON or binary).
+message FrameEnvelope {
+  string type = 1;
+  bytes payload = 2;
+}

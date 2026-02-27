@@ -1,0 +1,7 @@
+{
+  "host": "localhost",
+  "port": 8080,
+  "model": "gpt-3.5-turbo",
+  "provider": "openai",
+  "plugins": []
+}
