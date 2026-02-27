@@ -32,3 +32,4 @@ go.work
 .project
 .settings/
 .classpath
+*.wav
