@@ -13,7 +13,13 @@ const defaultConfig = `{
   "port": 8080,
   "model": "gpt-3.5-turbo",
   "provider": "openai",
-  "plugins": ["echo"]
+  "plugins": ["echo"],
+  "turn_detection": "none",
+  "turn_stop_secs": 3,
+  "turn_pre_speech_ms": 500,
+  "turn_max_duration_secs": 8,
+  "vad_start_secs": 0,
+  "vad_threshold": 0.02
 }
 `
 

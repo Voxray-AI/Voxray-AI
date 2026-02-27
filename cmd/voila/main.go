@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"voila-go/pkg/audio/turn"
+	"voila-go/pkg/audio/vad"
 	"voila-go/pkg/config"
 	"voila-go/pkg/logger"
 	"voila-go/pkg/pipeline"
@@ -89,6 +91,31 @@ func run(configPath string) error {
 			if useVoice {
 				llm, sttSvc, ttsSvc := services.NewServicesFromConfig(cfg)
 				pl = pipeline.New()
+				if cfg.TurnEnabled() {
+					vadDetector := vad.NewEnergyDetector()
+					if cfg.VadThreshold > 0 {
+						vadDetector.Threshold = cfg.VadThreshold
+					}
+					turnParams := turn.Params{
+						StopSecs:        cfg.TurnStopSecs,
+						PreSpeechMs:     cfg.TurnPreSpeechMs,
+						MaxDurationSecs: cfg.TurnMaxDurationSecs,
+					}
+					if turnParams.StopSecs <= 0 {
+						turnParams.StopSecs = turn.DefaultStopSecs
+					}
+					if turnParams.PreSpeechMs <= 0 {
+						turnParams.PreSpeechMs = turn.DefaultPreSpeechMs
+					}
+					if turnParams.MaxDurationSecs <= 0 {
+						turnParams.MaxDurationSecs = turn.DefaultMaxDurationSecs
+					}
+					analyzer := turn.NewSilenceTurnAnalyzer(turnParams)
+					if cfg.VADStartSecs != 0 {
+						analyzer.UpdateVADStartSecs(cfg.VADStartSecs)
+					}
+					pl.Add(voice.NewTurnProcessor("turn", vadDetector, analyzer, 16000, 1))
+				}
 				pl.Add(voice.NewSTTProcessor("stt", sttSvc, 16000, 1))
 				pl.Add(voice.NewLLMProcessor("llm", llm))
 				pl.Add(voice.NewTTSProcessor("tts", ttsSvc, 24000))
