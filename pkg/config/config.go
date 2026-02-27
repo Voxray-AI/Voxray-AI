@@ -40,6 +40,14 @@ type Config struct {
 	VadThreshold        float64 `json:"vad_threshold,omitempty"`         // EnergyDetector RMS threshold (default 0.02)
 	TurnAsync           bool    `json:"turn_async,omitempty"`            // use async AnalyzeEndOfTurn instead of sync AppendAudio
 
+	// User turn / idle lifecycle (pipecat turns parity).
+	// When zero, UserTurnStopTimeoutSecs falls back to TurnStopSecs; when both
+	// are zero, a conservative default (5s) is used.
+	UserTurnStopTimeoutSecs float64 `json:"user_turn_stop_timeout_secs,omitempty"` // timeout with no activity before forcing user turn stop
+	// When >0, triggers a UserIdleFrame after the bot has finished speaking
+	// and the user has been idle for this duration.
+	UserIdleTimeoutSecs float64 `json:"user_idle_timeout_secs,omitempty"`
+
 	// VAD analyzer configuration (pipecat audio/vad). When unset, defaults
 	// match the Python VADParams defaults.
 	VADType       string  `json:"vad_type,omitempty"`       // "energy" (default), "silero", "aic" (future)

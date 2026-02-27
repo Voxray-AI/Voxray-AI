@@ -85,12 +85,15 @@ func TestTurnProcessorSyncModeEmitsOnComplete(t *testing.T) {
 		t.Fatalf("ProcessFrame returned error: %v", err)
 	}
 
-	if len(col.received) != 1 {
-		t.Fatalf("expected 1 frame downstream, got %d", len(col.received))
+	var out *frames.AudioRawFrame
+	for _, f := range col.received {
+		if af, ok := f.(*frames.AudioRawFrame); ok {
+			out = af
+			break
+		}
 	}
-	out, ok := col.received[0].(*frames.AudioRawFrame)
-	if !ok {
-		t.Fatalf("expected AudioRawFrame, got %T", col.received[0])
+	if out == nil {
+		t.Fatalf("expected downstream AudioRawFrame, got %T", col.received[0])
 	}
 	if len(out.Audio) != len(audioData) {
 		t.Fatalf("expected audio length %d, got %d", len(audioData), len(out.Audio))
@@ -125,12 +128,15 @@ func TestTurnProcessorAsyncModeEmitsOnAsyncComplete(t *testing.T) {
 		t.Fatalf("ProcessFrame(2) returned error: %v", err)
 	}
 
-	if len(col.received) != 1 {
-		t.Fatalf("expected 1 frame downstream, got %d", len(col.received))
+	var out *frames.AudioRawFrame
+	for _, f := range col.received {
+		if af, ok := f.(*frames.AudioRawFrame); ok {
+			out = af
+			break
+		}
 	}
-	out, ok := col.received[0].(*frames.AudioRawFrame)
-	if !ok {
-		t.Fatalf("expected AudioRawFrame, got %T", col.received[0])
+	if out == nil {
+		t.Fatalf("expected downstream AudioRawFrame, got %T", col.received[0])
 	}
 	expectedLen := len(chunk1) + len(chunk2)
 	if len(out.Audio) != expectedLen {
@@ -162,6 +168,34 @@ func TestTurnProcessorCancelClearsState(t *testing.T) {
 	}
 	if _, ok := col.received[len(col.received)-1].(*frames.CancelFrame); !ok {
 		t.Fatalf("expected last frame to be CancelFrame, got %T", col.received[len(col.received)-1])
+	}
+}
+
+func TestTurnProcessorEmitsUserTurnFrames(t *testing.T) {
+	ctx := context.Background()
+	an := &fakeAnalyzer{state: turn.Complete}
+	v := &fakeVAD{isSpeech: true}
+	p := NewTurnProcessor("turn", v, an, 16000, 1, false)
+
+	col := &collectProcessor{}
+	p.SetNext(col)
+
+	audioData := []byte{0x00, 0x00, 0x01, 0x00}
+	frame := frames.NewAudioRawFrame(audioData, 16000, 1, 0)
+
+	if err := p.ProcessFrame(ctx, frame, processors.Downstream); err != nil {
+		t.Fatalf("ProcessFrame returned error: %v", err)
+	}
+
+	foundStart := false
+	for _, f := range col.received {
+		switch f.(type) {
+		case *frames.UserStartedSpeakingFrame:
+			foundStart = true
+		}
+	}
+	if !foundStart {
+		t.Fatal("expected UserStartedSpeakingFrame downstream")
 	}
 }
 

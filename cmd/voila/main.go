@@ -130,7 +130,26 @@ func run(configPath string) error {
 				if cfg.VADStartSecs != 0 {
 					analyzer.UpdateVADStartSecs(cfg.VADStartSecs)
 				}
-				pl.Add(voice.NewTurnProcessor("turn", vadDetector, analyzer, 16000, 1, cfg.TurnAsync))
+				// Derive user turn/idle timeouts, falling back to sensible defaults.
+				userTurnStopTimeout := cfg.UserTurnStopTimeoutSecs
+				if userTurnStopTimeout <= 0 {
+					if cfg.TurnStopSecs > 0 {
+						userTurnStopTimeout = cfg.TurnStopSecs
+					} else {
+						userTurnStopTimeout = 5 // seconds
+					}
+				}
+				userIdleTimeout := cfg.UserIdleTimeoutSecs
+				pl.Add(voice.NewTurnProcessorWithUserTurn(
+					"turn",
+					vadDetector,
+					analyzer,
+					16000,
+					1,
+					cfg.TurnAsync,
+					userTurnStopTimeout,
+					userIdleTimeout,
+				))
 			}
 			pl.Add(voice.NewSTTProcessor("stt", sttSvc, 16000, 1))
 			pl.Add(voice.NewLLMProcessor("llm", llm))

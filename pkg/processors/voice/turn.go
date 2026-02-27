@@ -28,12 +28,31 @@ type TurnProcessor struct {
 	useAsync bool
 	// pendingResult holds the in-flight async analysis result channel, if any.
 	pendingResult <-chan turn.EndOfTurnResult
+
+	// userTurnController manages high-level user turn/idle events and emits
+	// UserStartedSpeakingFrame, UserStoppedSpeakingFrame, and UserIdleFrame.
+	userTurnController *turn.UserTurnController
 }
 
 // NewTurnProcessor returns a processor that buffers audio and forwards one segment per turn.
 // When useAsync is true, end-of-turn detection is driven via Analyzer.AnalyzeEndOfTurnAsync;
 // otherwise the synchronous AppendAudio return value is used.
 func NewTurnProcessor(name string, v vad.Detector, a turn.Analyzer, sampleRate, channels int, useAsync bool) *TurnProcessor {
+	return NewTurnProcessorWithUserTurn(name, v, a, sampleRate, channels, useAsync, 5.0, 0.0)
+}
+
+// NewTurnProcessorWithUserTurn is like NewTurnProcessor but allows callers to
+// configure user turn stop and idle timeouts.
+func NewTurnProcessorWithUserTurn(
+	name string,
+	v vad.Detector,
+	a turn.Analyzer,
+	sampleRate,
+	channels int,
+	useAsync bool,
+	userTurnStopTimeout float64,
+	userIdleTimeout float64,
+) *TurnProcessor {
 	if name == "" {
 		name = "Turn"
 	}
@@ -44,7 +63,7 @@ func NewTurnProcessor(name string, v vad.Detector, a turn.Analyzer, sampleRate, 
 		channels = 1
 	}
 	a.SetSampleRate(sampleRate)
-	return &TurnProcessor{
+	p := &TurnProcessor{
 		BaseProcessor: processors.NewBaseProcessor(name),
 		VAD:           v,
 		Analyzer:      a,
@@ -52,6 +71,21 @@ func NewTurnProcessor(name string, v vad.Detector, a turn.Analyzer, sampleRate, 
 		Channels:      channels,
 		useAsync:      useAsync,
 	}
+
+	// Wire a simple user turn controller using VAD-only strategies and
+	// conservative timeouts (5s stop timeout, 0 idle timeout by default).
+	startStrategy := &turn.VADUserTurnStartStrategy{}
+	stopStrategy := &turn.SilenceUserTurnStopStrategy{}
+	p.userTurnController = turn.NewUserTurnController(
+		startStrategy,
+		stopStrategy,
+		userTurnStopTimeout,
+		userIdleTimeout,
+		func(ctx context.Context, f frames.Frame) error {
+			return p.PushDownstream(ctx, f)
+		},
+	)
+	return p
 }
 
 // ProcessFrame buffers AudioRawFrame, runs VAD and turn detection; on turn complete pushes audio downstream.
@@ -93,6 +127,11 @@ func (p *TurnProcessor) ProcessFrame(ctx context.Context, f frames.Frame, dir pr
 	isSpeech, err := p.VAD.IsSpeech(af)
 	if err != nil {
 		isSpeech = false
+	}
+
+	// Feed VAD event into user turn controller to drive high-level start/stop/idle.
+	if p.userTurnController != nil {
+		_ = p.userTurnController.ProcessVADUpdate(ctx, isSpeech)
 	}
 
 	p.buffer = append(p.buffer, chunk...)

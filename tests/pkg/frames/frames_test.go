@@ -36,3 +36,9 @@ func TestNewCancelFrame(t *testing.T) {
 	}
 }
 
+func TestUserTurnFramesImplementFrame(t *testing.T) {
+	var _ frames.Frame = (&frames.UserStartedSpeakingFrame{})
+	var _ frames.Frame = (&frames.UserStoppedSpeakingFrame{})
+	var _ frames.Frame = (&frames.UserIdleFrame{})
+}
+

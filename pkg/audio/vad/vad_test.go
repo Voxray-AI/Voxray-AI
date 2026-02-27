@@ -15,14 +15,24 @@ func TestBaseAnalyzerStateTransitions(t *testing.T) {
 	a := newBaseAnalyzer(backend)
 	a.SetSampleRate(16000)
 	a.SetParams(Params{
-		Confidence: 0.1,
+		// Use low thresholds so a single loud window is enough to move
+		// the state machine away from Quiet.
+		Confidence: 0.05,
 		StartSecs:  0.0,
 		StopSecs:   0.0,
-		MinVolume:  0.0,
+		MinVolume:  0.1,
 	})
 
-	// Generate a small non-zero buffer to simulate speech.
-	speech := []byte{0x10, 0x00, 0x20, 0x00}
+	// Generate a buffer large and loud enough to be treated as speech by the
+	// energy backend and to satisfy the window-size requirement.
+	// For 16 kHz, EnergyAnalyzerBackend uses a 10 ms window, i.e. 160 frames
+	// or 320 bytes for mono 16‑bit PCM.
+	speech := make([]byte, 320)
+	for i := 0; i < len(speech); i += 2 {
+		// Max positive 16‑bit sample (0x7FFF) in little‑endian.
+		speech[i] = 0xFF
+		speech[i+1] = 0x7F
+	}
 	state, _, _, err := a.Analyze(speech)
 	if err != nil {
 		t.Fatalf("Analyze returned error: %v", err)
