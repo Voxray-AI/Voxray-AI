@@ -166,8 +166,17 @@ func (t *ConnTransport) readLoop() {
 			logger.Error("decode frame: %v", err)
 			continue
 		}
-		// We successfully received and decoded a frame from the client,
-		// so update last-activity time.
+		// Skip keepalive/handshake-only messages (serializer returns nil frame).
+		if f == nil {
+			t.touch()
+			continue
+		}
+		// Optional: notify serializer of StartFrame for sample rate etc.
+		if setup, ok := t.serializer.(serialize.SerializerWithSetup); ok {
+			if start, ok := f.(*frames.StartFrame); ok {
+				setup.Setup(start)
+			}
+		}
 		t.touch()
 		select {
 		case <-t.closed:
@@ -179,9 +188,9 @@ func (t *ConnTransport) readLoop() {
 
 func (t *ConnTransport) writeLoop() {
 	defer func() { _ = t.Close() }()
-	msgType := websocket.TextMessage
+	useBinaryDefault := false
 	if _, ok := t.serializer.(serialize.ProtobufSerializer); ok {
-		msgType = websocket.BinaryMessage
+		useBinaryDefault = true
 	}
 	for {
 		select {
@@ -191,7 +200,21 @@ func (t *ConnTransport) writeLoop() {
 			if !ok {
 				return
 			}
-			data, err := t.serializer.Serialize(f)
+			var data []byte
+			var err error
+			msgType := websocket.TextMessage
+			if withType, ok := t.serializer.(serialize.SerializerWithMessageType); ok {
+				var binary bool
+				data, binary, err = withType.SerializeWithType(f)
+				if binary {
+					msgType = websocket.BinaryMessage
+				}
+			} else {
+				data, err = t.serializer.Serialize(f)
+				if useBinaryDefault {
+					msgType = websocket.BinaryMessage
+				}
+			}
 			if err != nil {
 				logger.Error("encode frame: %v", err)
 				continue
@@ -204,7 +227,6 @@ func (t *ConnTransport) writeLoop() {
 				logger.Error("websocket write: %v", err)
 				return
 			}
-			// Frame successfully written to the client; update last-activity time.
 			t.touch()
 		}
 	}
