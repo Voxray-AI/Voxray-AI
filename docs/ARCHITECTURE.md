@@ -45,7 +45,7 @@ High-level architecture of the **voila-go** real-time voice pipeline server.
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                     PROCESSORS (pkg/processors)                                    │
 │  Turn (VAD + silence) → STT → LLM → TTS → Sink   (voice pipeline)                 │
-│  Or: plugins (echo, logger, aggregator) → Sink   (config-driven)                  │
+│  Or: plugins (echo, logger, aggregator, dtmf_aggregator, llmtext, …) → Sink        │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -185,7 +185,7 @@ sequenceDiagram
 | **Transport** | `pkg/transport`, `transport/websocket`, `transport/smallwebrtc` | Bidirectional frame channels (Input/Output), Start/Close |
 | **Runner** | `pkg/pipeline` (Runner) | Connect transport to pipeline; forward input → Push; pipeline output → transport |
 | **Pipeline** | `pkg/pipeline` (Pipeline) | Linear processor chain; Setup/Cleanup; Push(StartFrame), Push(frames) |
-| **Processors** | `pkg/processors`, `processors/voice`, `processors/echo`, etc. | Turn (VAD), STT, LLM, TTS, Sink; or echo/logger/aggregator |
+| **Processors** | `pkg/processors`, `processors/voice`, `processors/echo`, `processors/aggregators/*` | Turn (VAD), STT, LLM, TTS, Sink; echo/logger/aggregator; pipecat aggregators (dtmf_aggregator, gated, llmfullresponse, llmtext, userresponse, gated_llm_context, llmcontextsummarizer) |
 | **Services** | `pkg/services`, `services/*` | LLM, STT, TTS provider implementations (OpenAI, Groq, Sarvam, AWS, …) |
 | **Frames** | `pkg/frames`, `frames/serialize` | Frame types (Start, Cancel, Audio, Text, Transcription, …); JSON / binary protobuf |
 | **Support** | `pkg/config`, `pkg/audio`, `pkg/observers`, `pkg/plugin` | Config, VAD/turn/resample, metrics, plugin registry |
@@ -212,6 +212,16 @@ When `config` has `provider` and `model`, the server builds a **voice pipeline**
 
 Otherwise, the pipeline is built from **config.Plugins** (e.g. echo, logger, aggregator) and ends with Sink.
 
+**Pipecat-style aggregators** (in `pkg/processors/aggregators/`) can be registered and used in plugin pipelines or composed with the voice pipeline:
+
+- **dtmf_aggregator**: Accumulates `InputDTMFFrame` digits; flushes as `TranscriptionFrame` on timeout, `#`, or End/Cancel. Place before LLM when using DTMF input (e.g. telephony IVR).
+- **gated**: Buffers frames when a custom gate is closed; releases when gate opens. Use for flow control.
+- **llmfullresponse**: Aggregates LLM text between `LLMFullResponseStartFrame` and `LLMFullResponseEndFrame`; calls an optional callback on completion or interruption (e.g. for voicemail/IVR).
+- **llmtext**: Converts `LLMTextFrame` → `AggregatedTextFrame` via a configurable text aggregator (e.g. sentence). Place after LLM, before TTS or sentence aggregator.
+- **userresponse**: Buffers `TranscriptionFrame` and emits one aggregated transcription on `UserStoppedSpeakingFrame` or End/Cancel. Use when the pipeline provides user-turn boundaries.
+- **gated_llm_context**: Holds `LLMContextFrame` until a notifier signals release.
+- **llmcontextsummarizer**: Monitors context size; pushes `LLMContextSummaryRequestFrame` when thresholds are exceeded; applies `LLMContextSummaryResultFrame` to compress history.
+
 ---
 
 ## 6. File Layout (Key Paths)
@@ -223,7 +233,7 @@ voila-go/
 │   ├── server/          # StartServers, WebSocket + WebRTC
 │   ├── transport/       # Transport interface; websocket, smallwebrtc
 │   ├── pipeline/        # Pipeline, Runner, Source, Sink, Registry
-│   ├── processors/      # Processor interface; voice (Turn, STT, LLM, TTS), echo, aggregator, logger
+│   ├── processors/      # Processor interface; voice (Turn, STT, LLM, TTS), echo, aggregator, logger; aggregators (dtmf, gated, llmfullresponse, llmtext, userresponse, gatedcontext, llmcontextsummarizer)
 │   ├── services/        # Factory; LLM/STT/TTS providers (openai, groq, sarvam, aws, …)
 │   ├── frames/          # Frame types; serialize (JSON, binary protobuf)
 │   ├── config/          # Config, LoadConfig

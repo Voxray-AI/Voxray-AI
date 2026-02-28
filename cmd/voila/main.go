@@ -24,6 +24,13 @@ import (
 	"voila-go/pkg/pipeline"
 	"voila-go/pkg/processors"
 	"voila-go/pkg/processors/aggregator"
+	"voila-go/pkg/processors/aggregators/dtmf"
+	"voila-go/pkg/processors/aggregators/gated"
+	"voila-go/pkg/processors/aggregators/gatedcontext"
+	"voila-go/pkg/processors/aggregators/llmcontextsummarizer"
+	"voila-go/pkg/processors/aggregators/llmfullresponse"
+	"voila-go/pkg/processors/aggregators/llmtext"
+	"voila-go/pkg/processors/aggregators/userresponse"
 	"voila-go/pkg/processors/echo"
 	proclog "voila-go/pkg/processors/logger"
 	"voila-go/pkg/processors/voice"
@@ -101,6 +108,17 @@ func run(configPath string, flags runFlags) error {
 	pipeline.RegisterProcessor("echo", func(name string) processors.Processor { return echo.New(name) })
 	pipeline.RegisterProcessor("logger", func(name string) processors.Processor { return proclog.New(name) })
 	pipeline.RegisterProcessor("aggregator", func(name string) processors.Processor { return aggregator.New(name, "", 0) })
+	pipeline.RegisterProcessor("dtmf_aggregator", func(name string) processors.Processor { return dtmf.New(name, 0, "", "") })
+	pipeline.RegisterProcessor("gated", func(name string) processors.Processor {
+		return gated.New(name, nil, nil, true, processors.Downstream)
+	})
+	pipeline.RegisterProcessor("llmfullresponse", func(name string) processors.Processor { return llmfullresponse.New(name, nil) })
+	pipeline.RegisterProcessor("llmtext", func(name string) processors.Processor { return llmtext.New(name, nil) })
+	pipeline.RegisterProcessor("userresponse", func(name string) processors.Processor { return userresponse.New(name) })
+	pipeline.RegisterProcessor("gated_llm_context", func(name string) processors.Processor { return gatedcontext.New(name, nil, false) })
+	pipeline.RegisterProcessor("llmcontextsummarizer", func(name string) processors.Processor {
+		return llmcontextsummarizer.New(name, nil, llmcontextsummarizer.DefaultConfig())
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

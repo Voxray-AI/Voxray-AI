@@ -7,6 +7,7 @@ import (
 
 	"voila-go/pkg/frames"
 	"voila-go/pkg/processors"
+	"voila-go/pkg/utils/sentence"
 )
 
 // Processor collects TextFrame (and LLMTextFrame) chunks and emits one TextFrame when a sentence boundary is seen or buffer exceeds max size.
@@ -64,13 +65,8 @@ func (p *Processor) tryFlush(ctx context.Context) {
 	flush := false
 	if p.MaxBuffer > 0 && len([]rune(s)) >= p.MaxBuffer {
 		flush = true
-	} else {
-		for _, r := range p.SentenceEnd {
-			if strings.ContainsRune(s, r) {
-				flush = true
-				break
-			}
-		}
+	} else if sentence.MatchEndOfSentence(s, p.SentenceEnd) {
+		flush = true
 	}
 	if flush {
 		p.flush(ctx)
