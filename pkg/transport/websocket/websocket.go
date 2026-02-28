@@ -47,8 +47,8 @@ var upgrader = websocket.Upgrader{
 }
 
 // ConnTransport handles a single WebSocket connection as a Voila transport.
-// It manages the bidirectional flow of frames between the server and the client,
-// handling serialization and deserialization via the configured Serializer.
+// It exposes Input (frames from client) and Output (frames to client) and closes when the connection ends or Close is called.
+// Safe for multiple goroutines reading Input, writing to Output, or calling Done; Close is idempotent and must not be called concurrently with Send (sending on Output after Close may panic).
 type ConnTransport struct {
 	conn       *websocket.Conn
 	serializer serialize.Serializer
@@ -63,8 +63,9 @@ type ConnTransport struct {
 	lastActivity atomic.Int64
 }
 
-// NewConnTransport creates a transport for an already-upgraded WebSocket connection.
-// If serializer is nil, JSONSerializer is used (JSON envelope over text messages).
+// NewConnTransport builds a transport for an already-upgraded WebSocket connection.
+// If serializer is nil, JSON text messages are used. inBuf and outBuf set channel sizes; zero or negative values default to 64.
+// The caller must not use conn for reads or writes after passing it here.
 func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serialize.Serializer) *ConnTransport {
 	if inBuf <= 0 {
 		inBuf = 64
@@ -89,16 +90,19 @@ func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serial
 }
 
 // Input returns the channel of frames received from the client.
+// The channel is closed when the transport is closed. Receive-only; safe to read from multiple goroutines.
 func (t *ConnTransport) Input() <-chan frames.Frame { return t.inCh }
 
 // Output returns the channel to send frames to the client.
+// Do not send after calling Close; the channel is closed on Close.
 func (t *ConnTransport) Output() chan<- frames.Frame { return t.outCh }
 
-// Done returns a channel that is closed when the transport is closed.
+// Done returns a channel that is closed when the transport has shut down.
+// Safe to select from multiple goroutines.
 func (t *ConnTransport) Done() <-chan struct{} { return t.closed }
 
-// LastActivity returns the last recorded activity time for this connection.
-// If no activity has been recorded yet, it returns the zero time.
+// LastActivity returns the last time a frame was successfully read from or written to the client.
+// Returns zero time if no activity has been recorded. Used for session timeouts.
 func (t *ConnTransport) LastActivity() time.Time {
 	ns := t.lastActivity.Load()
 	if ns == 0 {
@@ -112,8 +116,9 @@ func (t *ConnTransport) touch() {
 	t.lastActivity.Store(time.Now().UnixNano())
 }
 
-// Start starts the read and write loops. It returns once the connection is set up (no error).
-// The provided context is used to drive shutdown; when it is canceled, the transport is closed.
+// Start starts the read and write loops and returns immediately.
+// The context drives shutdown: when it is canceled, the transport is closed.
+// Returns an error if ctx is nil.
 func (t *ConnTransport) Start(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("websocket: nil context passed to ConnTransport.Start")
@@ -131,7 +136,8 @@ func (t *ConnTransport) Start(ctx context.Context) error {
 	return nil
 }
 
-// Close closes the connection and channels.
+// Close closes the WebSocket and the Input/Output channels.
+// Idempotent; safe to call from any goroutine. After Close, sending on Output may panic.
 func (t *ConnTransport) Close() error {
 	var err error
 	t.once.Do(func() {
@@ -204,13 +210,13 @@ func (t *ConnTransport) writeLoop() {
 	}
 }
 
-// DefaultSessionTimeout is the default inactivity timeout for a WebSocket
-// connection before it is closed by the server. A value of zero disables
-// inactivity-based session timeouts.
+// DefaultSessionTimeout is the default inactivity duration before the server closes a WebSocket.
+// Zero disables inactivity timeouts.
 const DefaultSessionTimeout = 5 * time.Minute
 
-// Server is a specialized HTTP server that upgrades incoming connections to WebSockets
-// and initializes a ConnTransport for each session.
+// Server is an HTTP server that upgrades requests to /ws to WebSocket and creates a ConnTransport per connection.
+// SessionTimeout is the idle timeout before closing a connection; zero or negative disables it.
+// OnConn is called in a new goroutine for each connection. RegisterHandlers, if set, is called once with the mux before serving.
 type Server struct {
 	Host string
 	Port int
@@ -224,7 +230,8 @@ type Server struct {
 	RegisterHandlers func(mux *http.ServeMux)
 }
 
-// ListenAndServe starts the HTTP server and blocks.
+// ListenAndServe starts the HTTP server and blocks until ctx is canceled.
+// It registers /ws and, if set, RegisterHandlers. Port 0 is treated as 8080.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -274,9 +281,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	return nil
 }
 
-// ServeWithListener starts the HTTP server using the provided listener. It uses the same
-// handler setup as ListenAndServe (including RegisterHandlers). Useful for tests that need
-// a dynamic port (e.g. listen on ":0" and get the port from listener.Addr()).
+// ServeWithListener runs the same handler logic as ListenAndServe but on the given listener.
+// The listener is not closed when the server shuts down. Used for tests with dynamic ports.
 func (s *Server) ServeWithListener(ctx context.Context, listener net.Listener) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {

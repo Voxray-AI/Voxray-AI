@@ -17,12 +17,15 @@ import (
 	ws "voila-go/pkg/transport/websocket"
 )
 
-// webrtcOfferResponse is the JSON response for POST /webrtc/offer.
+// webrtcOfferResponse is the JSON body for successful POST /webrtc/offer responses.
 type webrtcOfferResponse struct {
 	Answer string `json:"answer"`
 }
 
-// WebrtcOfferDoc documents the WebRTC offer endpoint for Swagger.
+// WebrtcOfferDoc documents the WebRTC offer HTTP endpoint for Swagger.
+// POST /webrtc/offer accepts a JSON body with an "offer" (SDP offer string), creates a new WebRTC transport, and returns an SDP answer.
+// The endpoint returns 400 for invalid or missing offer, 405 for non-POST, and 503 when the server cannot complete the connection (e.g. Opus encoder unavailable).
+// Each request gets its own transport; onTransport is invoked in a new goroutine.
 //
 // @Summary Submit WebRTC offer
 // @Description Accepts a WebRTC SDP offer and returns an SDP answer. Available when transport is smallwebrtc or both.
@@ -110,10 +113,10 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 	})
 }
 
-// StartServers starts the HTTP server that hosts the WebSocket endpoint (/ws)
-// and, optionally, the SmallWebRTC signaling endpoint (/webrtc/offer).
-// The onTransport callback is invoked for every new transport (WebSocket or WebRTC)
-// so the caller can attach it to a pipeline runner.
+// StartServers starts the HTTP server that serves the WebSocket endpoint at /ws and, when transport is smallwebrtc or both, the WebRTC signaling endpoint at POST /webrtc/offer.
+// The onTransport callback is run in a new goroutine for each new connection.
+// If cfg is nil, StartServers returns nil without starting anything.
+// The server runs until ctx is canceled.
 func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport)) error {
 	if cfg == nil {
 		return nil
@@ -147,9 +150,10 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 	return server.ListenAndServe(ctx)
 }
 
-// StartServersWithListener starts the same HTTP server as StartServers but using the
-// provided listener (e.g. from net.Listen("tcp", ":0")). Useful for integration tests
-// that need a dynamic port. The listener is closed by the caller when the test ends.
+// StartServersWithListener starts the same HTTP stack as StartServers but uses the provided listener (e.g. from net.Listen("tcp", ":0")).
+// The caller owns the listener and must close it when done.
+// Useful for tests that need a dynamic port.
+// If cfg is nil, returns nil without starting.
 func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport)) error {
 	if cfg == nil {
 		return nil
