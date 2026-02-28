@@ -2,7 +2,7 @@
 BINARY_NAME := voila
 MAIN_PKG := ./cmd/voila
 
-.PHONY: build build-voice run run-voice clean test tidy proto swagger
+.PHONY: build build-voice run run-voice clean test tidy proto swagger lint lint-fix evals
 
 # proto: generate Go from wire_frames.proto (requires protoc and protoc-gen-go)
 proto:
@@ -35,3 +35,15 @@ tidy:
 # swagger: regenerate API docs (requires: go install github.com/swaggo/swag/cmd/swag@latest)
 swagger:
 	swag init -g cmd/voila/main.go --parseDependency --parseInternal
+
+# lint: run pre-commit checks (gofmt + go vet)
+lint:
+	@./scripts/pre-commit.sh
+
+# lint-fix: fix formatting and optional golangci-lint
+lint-fix:
+	@./scripts/fix-lint.sh
+
+# evals: run eval scenarios (default config and voila config)
+evals:
+	go run ./cmd/evals -config scripts/evals/config/scenarios.json -voila-config config.json
