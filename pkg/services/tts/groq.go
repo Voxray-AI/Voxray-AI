@@ -3,11 +3,12 @@ package tts
 
 import (
 	"context"
-	"io"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"voila-go/pkg/audio"
@@ -94,7 +95,7 @@ func (s *GroqService) Speak(ctx context.Context, text string, sampleRate int) ([
 				"headerHex": headerHex,
 			},
 		}
-		f, err := os.OpenFile("d:\\Python\\pipecat_alt_go\\debug-5b8cd7.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(filepath.Join(os.TempDir(), "voila-go-debug-5b8cd7.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			return
 		}

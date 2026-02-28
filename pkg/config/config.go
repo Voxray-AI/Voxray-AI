@@ -31,7 +31,7 @@ type Config struct {
 	// When empty, a sensible default STUN server is used.
 	WebRTCICEServers []string `json:"webrtc_ice_servers,omitempty"`
 
-	// Turn detection (pipecat audio/turn): when to consider user finished speaking
+	// Turn detection: when to consider user finished speaking
 	TurnDetection       string  `json:"turn_detection,omitempty"`        // "none" | "silence"; default "none"
 	TurnStopSecs        float64 `json:"turn_stop_secs,omitempty"`        // silence after speech to end turn (default 3)
 	TurnPreSpeechMs     float64 `json:"turn_pre_speech_ms,omitempty"`   // pre-speech padding ms (default 500)
@@ -40,7 +40,7 @@ type Config struct {
 	VadThreshold        float64 `json:"vad_threshold,omitempty"`         // EnergyDetector RMS threshold (default 0.02)
 	TurnAsync           bool    `json:"turn_async,omitempty"`            // use async AnalyzeEndOfTurn instead of sync AppendAudio
 
-	// User turn / idle lifecycle (pipecat turns parity).
+	// User turn / idle lifecycle.
 	// When zero, UserTurnStopTimeoutSecs falls back to TurnStopSecs; when both
 	// are zero, a conservative default (5s) is used.
 	UserTurnStopTimeoutSecs float64 `json:"user_turn_stop_timeout_secs,omitempty"` // timeout with no activity before forcing user turn stop
@@ -48,7 +48,7 @@ type Config struct {
 	// and the user has been idle for this duration.
 	UserIdleTimeoutSecs float64 `json:"user_idle_timeout_secs,omitempty"`
 
-	// VAD analyzer configuration (pipecat audio/vad). When unset, defaults
+	// VAD analyzer configuration. When unset, defaults
 	// match the Python VADParams defaults.
 	VADType       string  `json:"vad_type,omitempty"`       // "energy" (default), "silero", "aic" (future)
 	VADConfidence float64 `json:"vad_confidence,omitempty"` // default 0.7

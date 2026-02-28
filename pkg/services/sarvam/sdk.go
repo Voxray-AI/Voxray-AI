@@ -13,7 +13,7 @@ const (
 // sdkHeaders returns identification headers similar to the Python SDK's sdk_headers().
 func sdkHeaders() map[string]string {
 	return map[string]string{
-		"User-Agent": fmt.Sprintf("Pipecat-Go/dev Go/%s", runtime.Version()),
+		"User-Agent": fmt.Sprintf("Voila-Go/dev Go/%s", runtime.Version()),
 	}
 }
 

@@ -1,5 +1,5 @@
-// Package turn provides end-of-turn detection for audio conversations,
-// ported from pipecat audio/turn (base_turn_analyzer + silence-based smart turn).
+// Package turn provides end-of-turn detection for audio conversations
+// (base turn analyzer + silence-based smart turn).
 package turn
 
 import "context"

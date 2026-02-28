@@ -1,6 +1,5 @@
 // Package services defines interfaces and implementations for LLM, STT, and TTS.
-// These align conceptually with the Python Pipecat service abstractions:
-// llm_service.LLMService, stt_service.STTService, tts_service.TTSService, and
+// These align conceptually with common LLM/STT/TTS service abstractions and
 // websocket/realtime session handling. See pkg/services/factory.go for provider wiring.
 package services
 

@@ -40,7 +40,7 @@ For Groq (faster, cheaper), with optional task-specific models:
 
 You can mix providers per task (e.g. OpenAI for STT, Groq for LLM and TTS) by setting `stt_provider`, `llm_provider`, and `tts_provider`; put the corresponding keys in `api_keys` (e.g. `openai`, `groq`).
 
-To enable SmallWebRTC signaling (mirroring Pipecat’s `small_webrtc` network transport), set:
+To enable SmallWebRTC signaling (mirroring the `small_webrtc` network transport), set:
 
 ```json
 {

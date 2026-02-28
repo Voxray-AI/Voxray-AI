@@ -7,7 +7,7 @@ import (
 	"voila-go/pkg/audio"
 )
 
-// State represents the high-level VAD state, mirroring pipecat.audio.vad.VADState.
+// State represents the high-level VAD state.
 type State int
 
 const (
@@ -17,8 +17,7 @@ const (
 	StateStopping
 )
 
-// Params configures Voice Activity Detection behaviour. It roughly mirrors
-// pipecat.audio.vad.VADParams in the Python library.
+// Params configures Voice Activity Detection behaviour.
 type Params struct {
 	// Confidence is the minimum voice confidence (0..1) required to treat audio
 	// as speech.

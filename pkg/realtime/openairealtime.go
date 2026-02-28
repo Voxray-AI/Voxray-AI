@@ -1,8 +1,8 @@
 // Package realtime provides realtime session implementations (OpenAI Realtime API and shim).
 // RealtimeSession (SendText, SendAudio, Events, Close) and RealtimeService (NewSession) align with
-// the Python Pipecat openai_realtime and websocket_service abstractions: a long-lived bidirectional
-// session over WebSocket with event-driven input/output. OpenAIRealtimeAPI uses the official
-// OpenAI Realtime WebSocket API; use realtime.NewFromConfig(cfg, "openai") to construct it.
+// OpenAI Realtime and WebSocket session abstractions: a long-lived bidirectional session over
+// WebSocket with event-driven input/output. OpenAIRealtimeAPI uses the official OpenAI Realtime
+// WebSocket API; use realtime.NewFromConfig(cfg, "openai") to construct it.
 package realtime
 
 import (

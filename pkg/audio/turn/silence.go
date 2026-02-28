@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Default silence-based turn parameters (from pipecat base_smart_turn).
+// Default silence-based turn parameters.
 const (
 	DefaultStopSecs        = 3
 	DefaultPreSpeechMs     = 500

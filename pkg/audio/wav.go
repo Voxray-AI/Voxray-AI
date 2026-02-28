@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -89,7 +90,7 @@ func DecodeWAVToPCM(wav []byte) (pcm []byte, sampleRate int, err error) {
 					"headerHex":   headerHex,
 				},
 			}
-			f, err := os.OpenFile("d:\\Python\\pipecat_alt_go\\debug-5b8cd7.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			f, err := os.OpenFile(filepath.Join(os.TempDir(), "voila-go-debug-5b8cd7.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			if err != nil {
 				return
 			}

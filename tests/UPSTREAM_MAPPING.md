@@ -1,6 +1,6 @@
 ### Upstream test mapping
 
-This document tracks which upstream Python tests from `pipecat/tests` have
+This document tracks which upstream Python tests from the reference test suite have
 been conceptually ported into the Go test suite.
 
 - **VAD / speech activity**

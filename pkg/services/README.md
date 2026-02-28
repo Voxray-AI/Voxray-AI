@@ -1,6 +1,6 @@
 # Services layer
 
-This package provides LLM, STT, TTS, and realtime service abstractions aligned with the [Pipecat Python services](https://github.com/pipecat-ai/pipecat/tree/main/src/pipecat/services). Use the factory and `config.Config` to construct implementations by provider name.
+This package provides LLM, STT, TTS, and realtime service abstractions aligned with common LLM/STT/TTS service patterns. Use the factory and `config.Config` to construct implementations by provider name.
 
 ## Interfaces
 
@@ -27,10 +27,9 @@ These are the providers currently implemented in this Go port.
 
 Constants: `ProviderOpenAI`, `ProviderGroq`, `ProviderSarvam`, `ProviderGrok`, `ProviderCerebras`, `ProviderElevenLabs`, `ProviderAWS`, `ProviderMistral`, `ProviderDeepSeek`. Realtime: `SupportedRealtimeProviders` (currently `"openai"`).
 
-## Upstream Pipecat providers and Go coverage
+## Upstream providers and Go coverage
 
-The Python Pipecat project exposes many more providers under
-[`src/pipecat/services`](https://github.com/pipecat-ai/pipecat/tree/main/src/pipecat/services).
+The upstream Python services expose many more providers.
 The table below inventories those providers by capability and indicates whether they
 currently have a Go implementation in this repository.
 

@@ -9,8 +9,8 @@ import (
 
 // UserTurnController manages high-level user turn state: when a user turn
 // starts and stops, and when the user has been idle for a configured timeout.
-// It is a lightweight analogue of pipecat's Python UserTurnController +
-// UserIdleController, adapted to the existing Go pipeline.
+// It is a lightweight analogue of UserTurnController + UserIdleController,
+// adapted to the existing Go pipeline.
 type UserTurnController struct {
 	startStrategy UserTurnStartStrategy
 	stopStrategy  UserTurnStopStrategy

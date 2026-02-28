@@ -5,8 +5,7 @@
 *.so
 *.dylib
 /bin/
-pipecat
-pipecat-go
+voila-go
 
 # Test binary, built with `go test -c`
 *.test
