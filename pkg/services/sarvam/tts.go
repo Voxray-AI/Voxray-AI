@@ -83,7 +83,7 @@ func (s *SarvamTTSService) Speak(ctx context.Context, text string, sampleRate in
 		"text":                 text,
 		"target_language_code": "en-IN",
 		"speaker":              s.voice,
-		"sample_rate":          sampleRate,
+		"speech_sample_rate":   sampleRate,
 		"enable_preprocessing": true,
 		"model":                s.model,
 		"pace":                 1.0,
@@ -152,21 +152,10 @@ func (s *SarvamTTSService) Speak(ctx context.Context, text string, sampleRate in
 	return []*frames.TTSAudioRawFrame{f}, nil
 }
 
-// SpeakStream runs TTS and sends the resulting TTSAudioRawFrame(s) to outCh.
-// This implementation currently performs a single HTTP request and streams
-// its result frames; it does not yet use Sarvam's WebSocket streaming API.
+// SpeakStream runs TTS using Sarvam's WebSocket streaming API and sends
+// TTSAudioRawFrame(s) to outCh as audio chunks arrive.
 func (s *SarvamTTSService) SpeakStream(ctx context.Context, text string, sampleRate int, outCh chan<- frames.Frame) {
-	framesOut, err := s.Speak(ctx, text, sampleRate)
-	if err != nil {
-		return
-	}
-	for _, f := range framesOut {
-		select {
-		case <-ctx.Done():
-			return
-		case outCh <- f:
-		}
-	}
+	s.runTTSStreaming(ctx, text, sampleRate, outCh)
 }
 
 // bytesReader returns an io.Reader for the provided byte slice without extra allocation.

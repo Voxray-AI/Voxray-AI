@@ -2,7 +2,7 @@
 BINARY_NAME := voila
 MAIN_PKG := ./cmd/voila
 
-.PHONY: build run clean test tidy proto swagger
+.PHONY: build build-voice run run-voice clean test tidy proto swagger
 
 # proto: generate Go from wire_frames.proto (requires protoc and protoc-gen-go)
 proto:
@@ -11,8 +11,16 @@ proto:
 build:
 	go build -o $(BINARY_NAME) $(MAIN_PKG)
 
+# build-voice: build with CGO so Opus encoder is included (required for WebRTC TTS). Needs gcc in PATH.
+build-voice:
+	CGO_ENABLED=1 go build -o $(BINARY_NAME) $(MAIN_PKG)
+
 run:
 	go run $(MAIN_PKG)
+
+# run-voice: run with CGO so WebRTC TTS works. E.g. make run-voice ARGS="-config config.json"
+run-voice:
+	CGO_ENABLED=1 go run $(MAIN_PKG) $(ARGS)
 
 clean:
 	-go clean

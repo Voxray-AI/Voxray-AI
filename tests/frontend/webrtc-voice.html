@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voila WebRTC Voice Client</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body {
+      min-height: 100%;
+      background: #fff;
+      color: #111;
+    }
+    @media (prefers-color-scheme: dark) {
+      html, body { background: #1a1a1a; color: #e4e4e4; }
+    }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 24px;
+      max-width: 980px;
+    }
+    .row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    button {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(102, 102, 102, 0.4);
+      cursor: pointer;
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+    input {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(102, 102, 102, 0.4);
+      min-width: 320px;
+    }
+    .card {
+      border: 1px solid rgba(102, 102, 102, 0.35);
+      border-radius: 14px;
+      padding: 14px;
+      margin-top: 14px;
+      background: rgba(0, 0, 0, 0.03);
+    }
+    @media (prefers-color-scheme: dark) {
+      .card { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.15); }
+    }
+    .muted { opacity: 0.85; }
+    pre { white-space: pre-wrap; word-break: break-word; margin: 0.5em 0 0; }
+    .pill {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(102, 102, 102, 0.4);
+      font-size: 12px;
+    }
+    audio { margin-top: 1rem; display: block; }
+    h2 { font-size: 1.25rem; }
+  </style>
+</head>
+<body>
+  <h2>WebRTC Voice Client</h2>
+  <p class="muted">Capture microphone, stream to the Voila backend (Sarvam STT + Groq LLM + Sarvam TTS), play response. Start Voila: <code>go run ./cmd/voila -config config.json</code> with <code>transport: "both"</code>. Serve this page: <code>cd tests/frontend && python -m http.server 3000</code> then open <code>http://localhost:3000/webrtc-voice.html</code>. Set Backend URL to where Voila runs (e.g. http://localhost:8080).</p>
+
+  <div class="row">
+    <label class="muted" for="baseUrl">Backend URL</label>
+    <input type="url" id="baseUrl" value="http://localhost:8080" placeholder="http://localhost:8080" aria-label="Voila backend URL (e.g. http://localhost:8080)">
+    <button id="connectBtn" aria-label="Connect to voice backend">Connect</button>
+    <button id="disconnectBtn" disabled aria-label="Disconnect from voice backend">Disconnect</button>
+    <span id="status" class="pill" aria-live="polite">idle</span>
+  </div>
+
+  <div class="card">
+    <p class="muted">Pipeline: mic → STT → LLM → TTS → speaker. Mic sent as audio track; TTS received on remote track.</p>
+    <div class="row" style="margin-top: 10px">
+      <span class="muted">Log</span>
+    </div>
+    <pre id="log" class="muted"></pre>
+  </div>
+
+  <audio id="remoteAudio" autoplay playsinline></audio>
+
+  <script>
+    (function () {
+      const baseUrlInput = document.getElementById('baseUrl');
+      const connectBtn = document.getElementById('connectBtn');
+      const disconnectBtn = document.getElementById('disconnectBtn');
+      const statusEl = document.getElementById('status');
+      const remoteAudio = document.getElementById('remoteAudio');
+      const logEl = document.getElementById('log');
+
+      let pc = null;
+      let localStream = null;
+
+      function setStatus(msg) {
+        statusEl.textContent = msg;
+      }
+
+      function logTime() {
+        const d = new Date();
+        return d.toTimeString().slice(0, 12) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+      }
+
+      function log(...args) {
+        const line = '[' + logTime() + '] ' + args.map(function (a) { return typeof a === 'string' ? a : JSON.stringify(a); }).join(' ');
+        logEl.textContent = (logEl.textContent + line + '\n').slice(-12000);
+      }
+
+      function setConnected(connected) {
+        connectBtn.disabled = connected;
+        disconnectBtn.disabled = !connected;
+      }
+
+      connectBtn.addEventListener('click', async function () {
+        const baseUrl = baseUrlInput.value.trim().replace(/\/$/, '');
+        const offerUrl = (baseUrl ? baseUrl : '') + '/webrtc/offer';
+        log('[STEP 0] Connect clicked. baseUrl=', baseUrl || '(same origin)', 'offerUrl=', offerUrl || '(same origin)/webrtc/offer');
+        setStatus('connecting');
+
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+          setStatus('idle');
+          log('[FAIL] Step 1: Microphone API not available. Use HTTPS or localhost.');
+          return;
+        }
+        log('[STEP 1] mediaDevices OK');
+
+        setStatus('Requesting microphone…');
+        log('[STEP 2] Requesting microphone permission…');
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+          setStatus('idle');
+          var errName = (e && e.name) || 'Unknown';
+          var errMsg = (e && e.message) || String(e);
+          log('[FAIL] Step 2: getUserMedia error:', errName, errMsg);
+          if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+            log('Allow microphone in the browser prompt, or check site permissions.');
+          }
+          return;
+        }
+        log('[STEP 2] Microphone ready, tracks:', localStream.getTracks().length);
+
+        log('[STEP 3] Creating RTCPeerConnection…');
+        pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        pc.oniceconnectionstatechange = function () {
+          setStatus(pc.iceConnectionState);
+          log('[ICE] connectionState=', pc.iceConnectionState);
+          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+            setConnected(false);
+          }
+        };
+        pc.onconnectionstatechange = function () {
+          log('[PC] connectionState=', pc.connectionState);
+        };
+        pc.onsignalingstatechange = function () {
+          log('[PC] signalingState=', pc.signalingState);
+        };
+
+        pc.ontrack = function (ev) {
+          log('[TRACK] Received remote track:', ev.track?.kind, 'id=', ev.track?.id, 'streams=', ev.streams?.length);
+          if (ev.streams && ev.streams[0]) {
+            remoteAudio.srcObject = ev.streams[0];
+            setStatus('connected');
+            log('[STEP 8] Playing remote audio (TTS).');
+          } else {
+            log('[TRACK] No stream on event, track only.');
+          }
+        };
+
+        localStream.getTracks().forEach(function (track) {
+          pc.addTrack(track, localStream);
+        });
+        log('[STEP 3] Added', localStream.getTracks().length, 'track(s) to peer connection.');
+
+        try {
+          log('[STEP 4] Creating offer…');
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          log('[STEP 4] Offer created, localDescription type=', pc.localDescription?.type);
+        } catch (e) {
+          setStatus('idle');
+          log('[FAIL] Step 4: Create offer failed:', e.message, e.name);
+          cleanup();
+          return;
+        }
+
+        if (pc.iceGatheringState !== 'complete') {
+          log('[STEP 5] ICE gathering… (state=', pc.iceGatheringState, ') waiting up to 5s');
+          const gatheringDone = new Promise(function (resolve) {
+            var done = false;
+            function finish() {
+              if (done) return;
+              done = true;
+              pc.removeEventListener('icegatheringstatechange', onComplete);
+              resolve();
+            }
+            function onComplete() {
+              if (pc.iceGatheringState === 'complete') finish();
+            }
+            pc.addEventListener('icegatheringstatechange', onComplete);
+            if (pc.iceGatheringState === 'complete') finish();
+            else setTimeout(function () {
+              if (pc.iceGatheringState === 'complete') finish();
+            }, 0);
+          });
+          const timeout = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+          await Promise.race([gatheringDone, timeout(5000)]);
+          log('[STEP 5] ICE gathering done. state=', pc.iceGatheringState);
+        } else {
+          log('[STEP 5] ICE already complete.');
+        }
+
+        if (baseUrl) {
+          log('[STEP 6] Checking server reachability:', offerUrl, '(OPTIONS)');
+          try {
+            const check = await fetch(offerUrl, { method: 'OPTIONS', mode: 'cors' });
+            log('[STEP 6] Server check response:', check.status, check.statusText);
+            if (check.status !== 204 && check.status !== 200) {
+              setStatus('idle');
+              log('[FAIL] Step 6: WebRTC endpoint not available (got', check.status, '). Ensure config has transport: "both".');
+              cleanup();
+              return;
+            }
+          } catch (e) {
+            setStatus('idle');
+            log('[FAIL] Step 6: Cannot reach', baseUrl, ':', e.message);
+            cleanup();
+            return;
+          }
+        } else {
+          log('[STEP 6] Same-origin, skipping server check.');
+        }
+
+        const offerSdp = JSON.stringify(pc.localDescription);
+        log('[STEP 7] POSTing offer to', offerUrl, '(body length=', offerSdp.length, 'chars)');
+        let resp;
+        try {
+          resp = await fetch(offerUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ offer: offerSdp })
+          });
+          log('[STEP 7] Response:', resp.status, resp.statusText, 'Content-Type:', resp.headers.get('Content-Type'));
+        } catch (e) {
+          setStatus('idle');
+          log('[FAIL] Step 7: Network error:', e.message);
+          cleanup();
+          return;
+        }
+
+        if (!resp.ok) {
+          var errBody = '';
+          try { errBody = await resp.text(); } catch (_) {}
+          var errMsg = errBody ? resp.status + ' ' + resp.statusText + ': ' + errBody.slice(0, 200) : resp.status + ' ' + resp.statusText;
+          setStatus('idle');
+          log('[FAIL] Step 7: Server error:', errMsg);
+          cleanup();
+          return;
+        }
+
+        var data;
+        try {
+          data = await resp.json();
+          log('[STEP 7] Parsed JSON. answer present=', !!data.answer, 'answer type=', typeof data.answer);
+        } catch (e) {
+          setStatus('idle');
+          log('[FAIL] Step 7: Invalid JSON from server:', e.message);
+          cleanup();
+          return;
+        }
+
+        if (!data.answer) {
+          setStatus('idle');
+          log('[FAIL] Step 7: No answer in response. Keys:', data ? Object.keys(data).join(', ') : 'none');
+          cleanup();
+          return;
+        }
+
+        log('[STEP 7] Setting remote description (answer)…');
+        try {
+          var answer = typeof data.answer === 'string' ? JSON.parse(data.answer) : data.answer;
+          log('[STEP 7] Answer type=', answer?.type, 'sdp length=', answer?.sdp?.length ?? 0);
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          log('[STEP 7] Remote description set successfully.');
+        } catch (e) {
+          setStatus('idle');
+          log('[FAIL] Step 7: Set remote description failed:', e.message, e.name);
+          cleanup();
+          return;
+        }
+
+        setConnected(true);
+        setStatus(pc.connectionState || 'connecting');
+        log('[DONE] Signaling complete. Waiting for ICE and remote track. connectionState=', pc.connectionState, 'signalingState=', pc.signalingState);
+      });
+
+      function cleanup() {
+        log('Cleanup: closing peer connection and stopping tracks.');
+        if (pc) {
+          pc.close();
+          pc = null;
+        }
+        if (localStream) {
+          localStream.getTracks().forEach(function (t) { t.stop(); });
+          localStream = null;
+        }
+        remoteAudio.srcObject = null;
+        setConnected(false);
+      }
+
+      disconnectBtn.addEventListener('click', function () {
+        log('Disconnecting…');
+        cleanup();
+        setStatus('idle');
+        log('Disconnected.');
+      });
+    })();
+  </script>
+</body>
+</html>

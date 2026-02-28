@@ -60,6 +60,34 @@ This will keep the WebSocket endpoint at `/ws` and also expose a WebRTC offer/an
 
 The response contains an `answer` field with the JSON SDP to use as the remote description on the client.
 
+### WebRTC + Sarvam STT/TTS + Groq LLM
+
+For a WebRTC-based real-time voice pipeline with **Sarvam** (STT and TTS) and **Groq** (LLM):
+
+```json
+{
+  "host": "localhost",
+  "port": 8080,
+  "transport": "both",
+  "stt_provider": "sarvam",
+  "llm_provider": "groq",
+  "tts_provider": "sarvam",
+  "model": "llama-3.1-8b-instant",
+  "stt_model": "saarika:v2.5",
+  "tts_model": "bulbul:v2",
+  "webrtc_ice_servers": ["stun:stun.l.google.com:19302"],
+  "api_keys": {
+    "sarvam": "<SARVAM_API_KEY>",
+    "groq": "<GROQ_API_KEY>"
+  }
+}
+```
+
+- **Run the server**: `go run ./cmd/voila -config config.json` (from repo root).
+- **Run the WebRTC client**: Open `tests/frontend/webrtc-voice.html` in a browser (or serve it), set the server URL to `http://localhost:8080`, click **Start**, allow the microphone, then speak. The synthesized reply is played back over the remote audio track.
+
+See `tests/frontend/README.md` for the JavaScript WebRTC client details.
+
 ## Run
 
 1. Set API keys:

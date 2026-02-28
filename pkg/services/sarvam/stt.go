@@ -12,6 +12,7 @@ import (
 
 	"voila-go/pkg/config"
 	"voila-go/pkg/frames"
+	"voila-go/pkg/logger"
 )
 
 // DefaultSarvamSTTModel is the default Sarvam STT model when none is specified.
@@ -24,20 +25,27 @@ const DefaultSarvamSTTModel = "saarika:v2.5"
 // It uses:
 //   POST https://api.sarvam.ai/speech-to-text (multipart/form-data)
 // with fields:
-//   - file: binary audio (we send raw bytes as provided)
+//   - file: binary audio (WAV or raw PCM; format must match input_audio_codec)
 //   - model: e.g. "saarika:v2.5" or "saaras:v3"
-//   - input_audio_codec: optional hint when we know we're sending raw PCM.
+//   - input_audio_codec: "wav" when sending WAV bytes, "pcm_s16le" for raw PCM
+//   - language_code: optional, e.g. "en-IN", "hi-IN"; empty means auto-detect
 type SarvamSTTService struct {
-	apiKey     string
-	baseURL    string
-	model      string
-	httpClient *http.Client
+	apiKey       string
+	baseURL      string
+	model        string
+	languageCode string // optional; empty = auto-detect
+	httpClient   *http.Client
 }
 
 // NewSTT creates a Sarvam STT service.
 // If apiKey is empty, config.GetEnv("SARVAM_API_KEY", "") is used.
 // If model is empty, DefaultSarvamSTTModel is used.
 func NewSTT(apiKey, model string) *SarvamSTTService {
+	return NewSTTWithLanguage(apiKey, model, "")
+}
+
+// NewSTTWithLanguage creates a Sarvam STT service with an optional language code.
+func NewSTTWithLanguage(apiKey, model, languageCode string) *SarvamSTTService {
 	if apiKey == "" {
 		apiKey = config.GetEnv("SARVAM_API_KEY", "")
 	}
@@ -45,9 +53,10 @@ func NewSTT(apiKey, model string) *SarvamSTTService {
 		model = DefaultSarvamSTTModel
 	}
 	return &SarvamSTTService{
-		apiKey:  apiKey,
-		baseURL: DefaultBaseURL,
-		model:   model,
+		apiKey:       apiKey,
+		baseURL:      DefaultBaseURL,
+		model:        model,
+		languageCode: languageCode,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -59,12 +68,21 @@ func (s *SarvamSTTService) Transcribe(ctx context.Context, audio []byte, sampleR
 	if len(audio) == 0 {
 		return nil, nil
 	}
+	// Detect WAV (RIFF header) vs raw PCM. Sarvam API requires correct format/codec.
+	isWAV := len(audio) >= 12 && bytes.Equal(audio[0:4], []byte("RIFF")) && bytes.Equal(audio[8:12], []byte("WAVE"))
+	fileName := "audio.pcm"
+	codec := "pcm_s16le"
+	if isWAV {
+		fileName = "audio.wav"
+		codec = "wav"
+	}
+	logger.Info("Sarvam STT request: %d bytes, %d Hz, %d ch, format=%s", len(audio), sampleRate, numChannels, codec)
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	// File part
-	fileWriter, err := writer.CreateFormFile("file", "audio.pcm")
+	// File part: filename and codec must match actual audio format
+	fileWriter, err := writer.CreateFormFile("file", fileName)
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +95,14 @@ func (s *SarvamSTTService) Transcribe(ctx context.Context, audio []byte, sampleR
 		return nil, err
 	}
 
-	// If we're clearly dealing with 16 kHz raw PCM, hint the codec.
-	if sampleRate == 16000 {
-		_ = writer.WriteField("input_audio_codec", "pcm_s16le")
+	// input_audio_codec: wav for WAV files, pcm_s16le for raw PCM (per Sarvam API)
+	if err := writer.WriteField("input_audio_codec", codec); err != nil {
+		return nil, err
+	}
+
+	// language_code: optional; REST API supports e.g. "en-IN", "unknown" for auto-detect
+	if s.languageCode != "" {
+		_ = writer.WriteField("language_code", s.languageCode)
 	}
 
 	if err := writer.Close(); err != nil {
@@ -114,14 +137,20 @@ func (s *SarvamSTTService) Transcribe(ctx context.Context, audio []byte, sampleR
 	}
 
 	var out struct {
-		Transcript    string  `json:"transcript"`
-		LanguageCode  *string `json:"language_code"`
-		RequestID     string  `json:"request_id"`
-		LanguageProb  *float64 `json:"language_probability"`
+		Transcript   string   `json:"transcript"`
+		LanguageCode *string `json:"language_code"`
+		RequestID    string  `json:"request_id"`
+		LanguageProb *float64 `json:"language_probability"`
 	}
 	if err := json.Unmarshal(respBody, &out); err != nil {
 		return nil, err
 	}
+
+	lang := ""
+	if out.LanguageCode != nil {
+		lang = *out.LanguageCode
+	}
+	logger.Info("Sarvam STT response: transcript=%q language=%s request_id=%s", out.Transcript, lang, out.RequestID)
 
 	// Even if transcript is empty, return a frame to keep behavior predictable.
 	tf := frames.NewTranscriptionFrame(out.Transcript, "user", "", true)
@@ -131,33 +160,11 @@ func (s *SarvamSTTService) Transcribe(ctx context.Context, audio []byte, sampleR
 	return []*frames.TranscriptionFrame{tf}, nil
 }
 
-// TranscribeStream buffers audio from audioCh and sends final TranscriptionFrame(s) to outCh.
-// This mirrors the behavior of the OpenAI STT implementation: it is not truly streaming
-// on the wire, but provides a streaming-friendly interface to the pipeline.
+// TranscribeStream uses Sarvam's WebSocket streaming STT API: it connects to the streaming
+// endpoint, sends audio from audioCh (as base64), and pushes TranscriptionFrame(s) to outCh
+// as transcript messages arrive. When audioCh closes, the buffered audio is sent and the
+// connection is closed. For one-off transcription use Transcribe (REST) instead.
 func (s *SarvamSTTService) TranscribeStream(ctx context.Context, audioCh <-chan []byte, sampleRate, numChannels int, outCh chan<- frames.Frame) {
-	var buf []byte
-	for {
-		select {
-		case <-ctx.Done():
-			if len(buf) > 0 && outCh != nil {
-				framesOut, _ := s.Transcribe(ctx, buf, sampleRate, numChannels)
-				for _, f := range framesOut {
-					outCh <- f
-				}
-			}
-			return
-		case chunk, ok := <-audioCh:
-			if !ok {
-				if len(buf) > 0 && outCh != nil {
-					framesOut, _ := s.Transcribe(ctx, buf, sampleRate, numChannels)
-					for _, f := range framesOut {
-						outCh <- f
-					}
-				}
-				return
-			}
-			buf = append(buf, chunk...)
-		}
-	}
+	s.runSTTStreaming(ctx, audioCh, sampleRate, numChannels, outCh)
 }
 

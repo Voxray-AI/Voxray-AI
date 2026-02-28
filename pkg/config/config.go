@@ -15,8 +15,9 @@ type Config struct {
 	SttProvider string            `json:"stt_provider,omitempty"`
 	LlmProvider string            `json:"llm_provider,omitempty"`
 	TtsProvider string            `json:"tts_provider,omitempty"`
-	STTModel   string            `json:"stt_model,omitempty"`
-	TTSModel   string            `json:"tts_model,omitempty"`
+	STTModel    string            `json:"stt_model,omitempty"`
+	STTLanguage string            `json:"stt_language,omitempty"` // e.g. "hi-IN", "en-IN"; empty = auto-detect (Sarvam)
+	TTSModel    string            `json:"tts_model,omitempty"`
 	TTSVoice   string            `json:"tts_voice,omitempty"`
 	Plugins     []string          `json:"plugins"`
 	APIKeys     map[string]string `json:"api_keys,omitempty"`

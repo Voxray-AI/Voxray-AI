@@ -133,7 +133,7 @@ func NewSTTFromConfig(cfg *config.Config, provider string) STTService {
 	case ProviderGroq:
 		return stt.NewGroqWithModel(apiKey, cfg.STTModel)
 	case ProviderSarvam:
-		return sarvam.NewSTT(apiKey, cfg.STTModel)
+		return sarvam.NewSTTWithLanguage(apiKey, cfg.STTModel, cfg.STTLanguage)
 	case ProviderElevenLabs:
 		return elevenlabs.NewSTT(apiKey, cfg.STTModel)
 	case ProviderAWS:

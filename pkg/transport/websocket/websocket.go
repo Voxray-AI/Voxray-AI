@@ -5,7 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,8 +20,30 @@ import (
 	"voila-go/pkg/logger"
 )
 
+// checkOrigin allows same-origin, same-host, or localhost/127.0.0.1 for development.
+// For production, restrict to your front-end origin to avoid cross-site WebSocket abuse.
+func checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	originHost := strings.ToLower(originURL.Hostname())
+	if originHost == "localhost" || originHost == "127.0.0.1" {
+		return true
+	}
+	reqHost := r.Host
+	if idx := strings.Index(reqHost, ":"); idx != -1 {
+		reqHost = reqHost[:idx]
+	}
+	return strings.ToLower(reqHost) == originHost
+}
+
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: checkOrigin,
 }
 
 // ConnTransport handles a single WebSocket connection as a Voila transport.
@@ -228,9 +253,14 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 	addr := fmt.Sprintf(":%d", port)
 	if s.Host != "" {
-		addr = fmt.Sprintf("%s:%d", s.Host, port)
+		host := s.Host
+		// Bind to IPv4 loopback when host is "localhost" so browsers connecting to
+		// http://localhost (often resolved to 127.0.0.1) can reach the server on Windows.
+		if host == "localhost" {
+			host = "127.0.0.1"
+		}
+		addr = fmt.Sprintf("%s:%d", host, port)
 	}
-
 	srv := &http.Server{Addr: addr, Handler: mux}
 	go func() {
 		<-ctx.Done()
@@ -240,6 +270,40 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}()
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("websocket server listen: %w", err)
+	}
+	return nil
+}
+
+// ServeWithListener starts the HTTP server using the provided listener. It uses the same
+// handler setup as ListenAndServe (including RegisterHandlers). Useful for tests that need
+// a dynamic port (e.g. listen on ":0" and get the port from listener.Addr()).
+func (s *Server) ServeWithListener(ctx context.Context, listener net.Listener) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			logger.Error("upgrade: %v", err)
+			return
+		}
+		tr := NewConnTransport(conn, 64, 64, nil)
+		if s.SessionTimeout > 0 {
+			go s.monitorSession(ctx, tr, s.SessionTimeout)
+		}
+		if s.OnConn != nil {
+			go s.OnConn(ctx, tr)
+		}
+	})
+	if s.RegisterHandlers != nil {
+		s.RegisterHandlers(mux)
+	}
+
+	srv := &http.Server{Handler: mux}
+	go func() {
+		<-ctx.Done()
+		_ = srv.Shutdown(context.Background())
+	}()
+	if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("websocket server serve: %w", err)
 	}
 	return nil
 }

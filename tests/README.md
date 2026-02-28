@@ -61,3 +61,43 @@ Example Sarvam-centric config:
   }
 }
 ```
+
+Example WebRTC voice (Sarvam STT/TTS + Groq LLM):
+
+```json
+{
+  "host": "localhost",
+  "port": 8080,
+  "transport": "both",
+  "webrtc_ice_servers": ["stun:stun.l.google.com:19302"],
+  "provider": "groq",
+  "stt_provider": "sarvam",
+  "llm_provider": "groq",
+  "tts_provider": "sarvam",
+  "model": "llama-3.1-8b-instant",
+  "stt_model": "saarika:v2.5",
+  "tts_model": "bulbul:v2",
+  "tts_voice": "anushka",
+  "plugins": ["echo"],
+  "api_keys": {
+    "groq": "<groq_key>",
+    "sarvam": "<sarvam_api_key>"
+  }
+}
+```
+
+### Live WebRTC voice (Sarvam + Groq)
+
+To run the **live** WebRTC voice integration (mic in, TTS out) in the browser:
+
+1. **Config** — Use a config with `transport: "both"`, Sarvam STT/TTS, Groq LLM, and API keys (e.g. the "Example WebRTC voice" above, or your `config.json` with `api_keys` for `groq` and `sarvam`).
+2. **Run the server** — From the repo root (so `web/` is served when present):
+   ```bash
+   go run ./cmd/voila --config config.json
+   ```
+3. **Use the browser client** — Open `http://localhost:<port>/` (e.g. `http://localhost:8090/`). Click **Connect**, then **Start mic**. Speak into your computer mic; TTS audio is played when received from the pipeline.
+
+Notes:
+
+- When the `web/` directory exists, the server serves the browser client at `/` and the WebRTC signaling endpoint at `/webrtc/offer`.
+- Transports: WebSocket (`/ws`) and SmallWebRTC (RTP/Opus audio tracks via `/webrtc/offer`).

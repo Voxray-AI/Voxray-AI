@@ -3,18 +3,22 @@
   "port": 8080,
   "model": "llama-3.1-8b-instant",
   "provider": "groq",
-  "stt_provider": "",
-  "llm_provider": "",
-  "tts_provider": "",
-  "stt_model": "whisper-large-v3-turbo",
-  "tts_model": "canopylabs/orpheus-v1-english",
-  "tts_voice": "alloy",
+  "transport": "both",
+  "webrtc_ice_servers": ["stun:stun.l.google.com:19302", "stun:openrelay.metered.ca:80"],
+  "stt_provider": "sarvam",
+  "llm_provider": "groq",
+  "tts_provider": "sarvam",
+  "stt_model": "saarika:v2.5",
+  "stt_language": "hi-IN",
+  "tts_model": "bulbul:v2",
+  "tts_voice": "anushka",
   "plugins": ["echo"],
   "api_keys": {
     "openai": "",
     "deepgram": "",
     "cartesia": "",
     "daily_room_url": "",
-    "groq": "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"
+    "groq": "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",
+    "sarvam": "sk_l4komhmj_3Xirk6qUEjbhHRPYge3hBHcN"
   }
 }
