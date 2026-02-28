@@ -85,6 +85,15 @@ func (p *Pipeline) Push(ctx context.Context, f frames.Frame) error {
 	return list[0].ProcessFrame(ctx, f, processors.Downstream)
 }
 
+// PushUpstream injects a frame into the last processor (upstream). Used when the pipeline is nested (e.g. inside ParallelPipeline).
+func (p *Pipeline) PushUpstream(ctx context.Context, f frames.Frame) error {
+	list := p.Processors()
+	if len(list) == 0 {
+		return nil
+	}
+	return list[len(list)-1].ProcessFrame(ctx, f, processors.Upstream)
+}
+
 func isHighVolumeFrame(f frames.Frame) bool {
 	switch f.(type) {
 	case *frames.AudioRawFrame, *frames.TTSAudioRawFrame:

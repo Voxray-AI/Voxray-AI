@@ -18,12 +18,14 @@ const minBatchRunes = 30 // don't flush tiny fragments; wait for at least this m
 
 // TTSProcessor turns LLMTextFrame, TextFrame, or TTSSpeakFrame into TTSAudioRawFrame using a TTSService.
 // It batches streamed LLM text by sentence (or MaxBatchRunes) so each TTS API call gets a full phrase, reducing choppy playback.
+// Emits BotStartedSpeakingFrame before the first TTS audio in a response and BotStoppedSpeakingFrame after each segment for observers.
 type TTSProcessor struct {
 	*processors.BaseProcessor
 	TTS            services.TTSService
 	SampleRate     int
 	MaxBatchRunes  int   // max runes before flushing without sentence end (0 = use default)
 	buf            strings.Builder
+	botSpeaking    bool // true after we've pushed BotStartedSpeakingFrame this turn; reset on UserStartedSpeakingFrame/StartFrame
 }
 
 // NewTTSProcessor returns a processor that speaks text and pushes TTSAudioRawFrame(s) downstream.
@@ -69,6 +71,10 @@ func (p *TTSProcessor) ProcessFrame(ctx context.Context, f frames.Frame, dir pro
 	case *frames.UserStartedSpeakingFrame:
 		// Barge-in: clear buffered text so no new speech is generated from the previous bot turn.
 		p.buf.Reset()
+		p.botSpeaking = false
+		return p.PushDownstream(ctx, f)
+	case *frames.StartFrame:
+		p.botSpeaking = false
 		return p.PushDownstream(ctx, f)
 	default:
 		_ = p.flush(ctx)
@@ -126,8 +132,15 @@ func (p *TTSProcessor) speak(ctx context.Context, text string) error {
 		_ = p.PushDownstream(ctx, frames.NewErrorFrame(err.Error(), false, p.Name()))
 		return nil
 	}
-	for _, af := range audioFrames {
+	for i, af := range audioFrames {
+		if !p.botSpeaking {
+			p.botSpeaking = true
+			_ = p.PushDownstream(ctx, frames.NewBotStartedSpeakingFrame())
+		}
 		_ = p.PushDownstream(ctx, af)
+		if i == len(audioFrames)-1 {
+			_ = p.PushDownstream(ctx, frames.NewBotStoppedSpeakingFrame())
+		}
 	}
 	logger.Info("pipeline (TTS): sent %d audio frame(s) to output", len(audioFrames))
 	return nil

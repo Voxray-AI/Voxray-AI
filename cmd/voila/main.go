@@ -20,6 +20,7 @@ import (
 	"voila-go/pkg/config"
 	"voila-go/pkg/frames"
 	"voila-go/pkg/logger"
+	"voila-go/pkg/observers"
 	"voila-go/pkg/pipeline"
 	"voila-go/pkg/processors"
 	"voila-go/pkg/processors/aggregator"
@@ -96,6 +97,17 @@ func run(configPath string) error {
 		if useVoice {
 			llm, sttSvc, ttsSvc := services.NewServicesFromConfig(cfg)
 			pl = pipeline.New()
+			// Composite observer for turn tracking, latency, and metrics.
+			metrics := observers.NewMetrics()
+			turnObs := observers.NewTurnTrackingObserver()
+			latencyObs := observers.NewUserBotLatencyObserver()
+			withMetrics := observers.NewObserverWithMetrics(
+				observers.NewCompositeObserver(turnObs, latencyObs),
+				metrics,
+			)
+			wrap := func(proc processors.Processor) processors.Processor {
+				return observers.WrapWithObserver(proc, withMetrics)
+			}
 			if cfg.TurnEnabled() {
 				// Construct VAD based on config.
 				var vadDetector vad.Detector
@@ -147,7 +159,7 @@ func run(configPath string) error {
 					}
 				}
 				userIdleTimeout := cfg.UserIdleTimeoutSecs
-				pl.Add(voice.NewTurnProcessorWithUserTurn(
+				pl.Add(wrap(voice.NewTurnProcessorWithUserTurn(
 					"turn",
 					vadDetector,
 					analyzer,
@@ -156,12 +168,13 @@ func run(configPath string) error {
 					cfg.TurnAsync,
 					userTurnStopTimeout,
 					userIdleTimeout,
-				))
+				)))
 			}
-			pl.Add(voice.NewSTTProcessor("stt", sttSvc, 16000, 1))
-			pl.Add(voice.NewLLMProcessor("llm", llm))
-			pl.Add(voice.NewTTSProcessor("tts", ttsSvc, 24000))
-			pl.Add(pipeline.NewSink("sink", tr.Output()))
+			pl.Add(wrap(voice.NewSTTProcessor("stt", sttSvc, 16000, 1)))
+			pl.Add(wrap(voice.NewLLMProcessor("llm", llm)))
+			pl.Add(wrap(voice.NewTTSProcessor("tts", ttsSvc, 24000)))
+			pl.Add(wrap(pipeline.NewSink("sink", tr.Output())))
+			_ = metrics // metrics available for OTELExport or logging if needed
 		} else {
 			pl = pipeline.New()
 			if err := pl.AddFromConfig(cfg); err != nil {

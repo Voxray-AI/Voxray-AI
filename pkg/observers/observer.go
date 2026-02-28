@@ -21,6 +21,25 @@ type NoopObserver struct{}
 
 func (NoopObserver) OnFrameProcessed(string, frames.Frame, processors.Direction) {}
 
+// CompositeObserver forwards OnFrameProcessed to multiple observers.
+type CompositeObserver struct {
+	Observers []Observer
+}
+
+// NewCompositeObserver returns an observer that delegates to all observers in order.
+func NewCompositeObserver(observers ...Observer) *CompositeObserver {
+	return &CompositeObserver{Observers: observers}
+}
+
+// OnFrameProcessed implements Observer.
+func (c *CompositeObserver) OnFrameProcessed(processorName string, f frames.Frame, dir processors.Direction) {
+	for _, o := range c.Observers {
+		if o != nil {
+			o.OnFrameProcessed(processorName, f, dir)
+		}
+	}
+}
+
 // ObserverWithMetrics wraps an observer and updates metrics (latency, token/char count).
 type ObserverWithMetrics struct {
 	Observer Observer

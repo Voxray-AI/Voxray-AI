@@ -9,6 +9,12 @@ import (
 	"voila-go/pkg/processors"
 )
 
+// DownstreamCallback is called when a frame is emitted downstream (e.g. from a sink).
+type DownstreamCallback func(ctx context.Context, f frames.Frame) error
+
+// UpstreamCallback is called when a frame is emitted upstream (e.g. from a source).
+type UpstreamCallback func(ctx context.Context, f frames.Frame) error
+
 // Source is a processor that reads frames from a channel and pushes them downstream.
 type Source struct {
 	*processors.BaseProcessor
@@ -74,6 +80,66 @@ func (s *Sink) ProcessFrame(ctx context.Context, f frames.Frame, dir processors.
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+	return nil
+}
+
+// PipelineSource is a processor that acts as the entry point of a pipeline; it forwards
+// downstream frames to the next processor and upstream frames to the provided callback.
+type PipelineSource struct {
+	*processors.BaseProcessor
+	OnUpstream UpstreamCallback
+	name       string
+}
+
+// NewPipelineSource returns a source that forwards upstream frames to the callback.
+func NewPipelineSource(name string, onUpstream UpstreamCallback) *PipelineSource {
+	if name == "" {
+		name = "PipelineSource"
+	}
+	return &PipelineSource{BaseProcessor: processors.NewBaseProcessor(name), OnUpstream: onUpstream, name: name}
+}
+
+// ProcessFrame implements Processor. Downstream goes to next; upstream goes to OnUpstream.
+func (s *PipelineSource) ProcessFrame(ctx context.Context, f frames.Frame, dir processors.Direction) error {
+	if dir == processors.Downstream {
+		if s.Next() != nil {
+			return s.Next().ProcessFrame(ctx, f, dir)
+		}
+		return nil
+	}
+	if dir == processors.Upstream && s.OnUpstream != nil {
+		return s.OnUpstream(ctx, f)
+	}
+	return nil
+}
+
+// PipelineSinkCallback is a processor that acts as the exit point of a pipeline; it forwards
+// upstream frames to the previous processor and downstream frames to the provided callback.
+type PipelineSinkCallback struct {
+	*processors.BaseProcessor
+	OnDownstream DownstreamCallback
+	name         string
+}
+
+// NewPipelineSinkCallback returns a sink that forwards downstream frames to the callback.
+func NewPipelineSinkCallback(name string, onDownstream DownstreamCallback) *PipelineSinkCallback {
+	if name == "" {
+		name = "PipelineSink"
+	}
+	return &PipelineSinkCallback{BaseProcessor: processors.NewBaseProcessor(name), OnDownstream: onDownstream, name: name}
+}
+
+// ProcessFrame implements Processor. Upstream goes to prev; downstream goes to OnDownstream.
+func (s *PipelineSinkCallback) ProcessFrame(ctx context.Context, f frames.Frame, dir processors.Direction) error {
+	if dir == processors.Upstream {
+		if s.Prev() != nil {
+			return s.Prev().ProcessFrame(ctx, f, dir)
+		}
+		return nil
+	}
+	if dir == processors.Downstream && s.OnDownstream != nil {
+		return s.OnDownstream(ctx, f)
 	}
 	return nil
 }

@@ -64,6 +64,19 @@ type ControlFrame struct{ Base }
 
 func (*ControlFrame) FrameType() string { return "ControlFrame" }
 
+// SyncFrame is a control frame used to synchronize parallel pipeline processing.
+// When a branch emits SyncFrame it signals that it has finished processing the current batch.
+type SyncFrame struct {
+	ControlFrame
+}
+
+func (*SyncFrame) FrameType() string { return "SyncFrame" }
+
+// NewSyncFrame creates a SyncFrame.
+func NewSyncFrame() *SyncFrame {
+	return &SyncFrame{ControlFrame: ControlFrame{Base: NewBase()}}
+}
+
 // StartFrame initializes the pipeline (first frame pushed).
 type StartFrame struct {
 	SystemFrame
@@ -96,6 +109,30 @@ func (*CancelFrame) FrameType() string { return "CancelFrame" }
 // NewCancelFrame creates a CancelFrame.
 func NewCancelFrame(reason any) *CancelFrame {
 	return &CancelFrame{SystemFrame: SystemFrame{Base: NewBase()}, Reason: reason}
+}
+
+// EndFrame signals that the pipeline has ended normally (all processing complete).
+type EndFrame struct {
+	SystemFrame
+}
+
+func (*EndFrame) FrameType() string { return "EndFrame" }
+
+// NewEndFrame creates an EndFrame.
+func NewEndFrame() *EndFrame {
+	return &EndFrame{SystemFrame: SystemFrame{Base: NewBase()}}
+}
+
+// StopFrame signals the pipeline to stop (processors keep connections open).
+type StopFrame struct {
+	SystemFrame
+}
+
+func (*StopFrame) FrameType() string { return "StopFrame" }
+
+// NewStopFrame creates a StopFrame.
+func NewStopFrame() *StopFrame {
+	return &StopFrame{SystemFrame: SystemFrame{Base: NewBase()}}
 }
 
 // ErrorFrame notifies upstream of an error.
@@ -213,4 +250,46 @@ func NewTransportMessageFrame(msg map[string]any) *TransportMessageFrame {
 		DataFrame: DataFrame{Base: NewBase()},
 		Message:   msg,
 	}
+}
+
+// Service switcher frame types for runtime service switching (e.g. STT/LLM/TTS).
+
+// ManuallySwitchServiceFrame requests switching to a service by name.
+type ManuallySwitchServiceFrame struct {
+	SystemFrame
+	ServiceName string `json:"service_name"`
+}
+
+func (*ManuallySwitchServiceFrame) FrameType() string { return "ManuallySwitchServiceFrame" }
+
+// NewManuallySwitchServiceFrame creates a frame to request switching to the named service.
+func NewManuallySwitchServiceFrame(serviceName string) *ManuallySwitchServiceFrame {
+	return &ManuallySwitchServiceFrame{SystemFrame: SystemFrame{Base: NewBase()}, ServiceName: serviceName}
+}
+
+// ServiceMetadataFrame carries metadata from a service (e.g. capabilities).
+type ServiceMetadataFrame struct {
+	SystemFrame
+	ServiceName string         `json:"service_name"`
+	Meta        map[string]any `json:"metadata,omitempty"`
+}
+
+func (*ServiceMetadataFrame) FrameType() string { return "ServiceMetadataFrame" }
+
+// NewServiceMetadataFrame creates a ServiceMetadataFrame.
+func NewServiceMetadataFrame(serviceName string, meta map[string]any) *ServiceMetadataFrame {
+	return &ServiceMetadataFrame{SystemFrame: SystemFrame{Base: NewBase()}, ServiceName: serviceName, Meta: meta}
+}
+
+// ServiceSwitcherRequestMetadataFrame requests metadata from a specific service.
+type ServiceSwitcherRequestMetadataFrame struct {
+	SystemFrame
+	ServiceName string `json:"service_name"`
+}
+
+func (*ServiceSwitcherRequestMetadataFrame) FrameType() string { return "ServiceSwitcherRequestMetadataFrame" }
+
+// NewServiceSwitcherRequestMetadataFrame creates a request for the named service's metadata.
+func NewServiceSwitcherRequestMetadataFrame(serviceName string) *ServiceSwitcherRequestMetadataFrame {
+	return &ServiceSwitcherRequestMetadataFrame{SystemFrame: SystemFrame{Base: NewBase()}, ServiceName: serviceName}
 }
