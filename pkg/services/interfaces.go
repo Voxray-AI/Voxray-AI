@@ -7,13 +7,17 @@ import (
 	"context"
 
 	"voila-go/pkg/frames"
+	"voila-go/pkg/services/llmapi"
 )
 
-// LLMService provides chat completion; may stream text frames.
-type LLMService interface {
-	// Chat runs a completion; for each streamed token/chunk, onToken is called with a text frame.
-	Chat(ctx context.Context, messages []map[string]any, onToken func(*frames.LLMTextFrame)) error
-}
+// LLMService provides chat completion; may stream text frames. Re-exported from llmapi.
+type LLMService = llmapi.LLMService
+
+// ToolHandler is called when the LLM requests a tool call. Re-exported from llmapi.
+type ToolHandler = llmapi.ToolHandler
+
+// LLMServiceWithTools is an LLM service that supports registering tools. Re-exported from llmapi.
+type LLMServiceWithTools = llmapi.LLMServiceWithTools
 
 // STTService transcribes audio to text (transcription frames).
 type STTService interface {

@@ -94,7 +94,7 @@ flowchart TB
         TTSSvc["TTS: OpenAI, Groq, Sarvam, ..."]
     end
 
-    subgraph Data["Data & Serialization"]
+    subgraph Data["Data and Serialization"]
         Frames["pkg/frames\nFrame, StartFrame, Audio, Text, ..."]
         Serialize["pkg/frames/serialize\nJSON / binary protobuf"]
     end
@@ -188,7 +188,9 @@ sequenceDiagram
 | **Processors** | `pkg/processors`, `processors/voice`, `processors/echo`, `processors/aggregators/*` | Turn (VAD), STT, LLM, TTS, Sink; echo/logger/aggregator; aggregators (dtmf_aggregator, gated, llmfullresponse, llmtext, userresponse, gated_llm_context, llmcontextsummarizer) |
 | **Services** | `pkg/services`, `services/*` | LLM, STT, TTS provider implementations (OpenAI, Groq, Sarvam, AWS, …) |
 | **Frames** | `pkg/frames`, `frames/serialize` | Frame types (Start, Cancel, Audio, Text, Transcription, …); JSON / binary protobuf |
-| **Support** | `pkg/config`, `pkg/audio`, `pkg/observers`, `pkg/plugin` | Config, VAD/turn/resample, metrics, plugin registry |
+| **Support** | `pkg/config`, `pkg/audio`, `pkg/observers`, `pkg/plugin`, `pkg/utils` | Config, VAD/turn/resample, metrics, plugin registry, backoff |
+| **WebSocket services** | `pkg/transport/websocket` (reconnect.go), `pkg/utils/backoff` | Reconnection, exponential backoff, verify (ping), send-with-retry for long-lived WebSocket services; see [WEBSOCKET_SERVICES.md](./WEBSOCKET_SERVICES.md) |
+| **MCP** | `pkg/mcp` | MCP client (stdio); list tools, convert schema, register with LLM; config.MCP |
 
 ---
 
@@ -247,22 +249,29 @@ voila-go/
 ├── cmd/voila/           # Entry: main, init
 ├── pkg/
 │   ├── server/          # StartServers; /ws, /webrtc/offer, /start, /sessions, telephony, Daily routes
-│   ├── transport/       # Transport interface; websocket (server + client), smallwebrtc, memory, whatsapp; base
+│   ├── transport/       # Transport interface; websocket (server + client, reconnect.go), smallwebrtc, memory, whatsapp; base
 │   ├── pipeline/        # Pipeline, Runner, Source, Sink, Registry
-│   ├── processors/      # Processor interface; voice (Turn, STT, LLM, TTS), echo, aggregator, logger; aggregators; filters; frameworks (external_chain, rtvi)
-│   ├── services/        # Factory; LLM/STT/TTS providers; RealtimeService (use realtime.NewFromConfig)
+│   ├── processors/      # Processor interface; ai_base (AIServiceBase); voice (Turn, STT, LLM, TTS), echo, aggregator, logger; aggregators; filters; frameworks (external_chain, rtvi)
+│   ├── services/        # Factory; llmapi (LLM/tools interfaces); LLM/STT/TTS providers; RealtimeService (use realtime.NewFromConfig)
 │   ├── realtime/        # OpenAI Realtime API (RealtimeSession, RealtimeService)
 │   ├── runner/          # SessionStore; daily (room/token); telephony message parsing, serializers
+│   ├── mcp/             # MCP client (stdio); GetToolsSchema, RegisterTools
 │   ├── frames/          # Frame types; serialize (JSON, binary protobuf; twilio, telnyx, plivo, exotel, …)
-│   ├── config/          # Config, LoadConfig
+│   ├── config/          # Config, LoadConfig, MCPConfig
 │   ├── audio/           # VAD, turn, resample, wav
 │   ├── observers/       # ObservingProcessor, metrics, turn tracking, user-bot latency
 │   ├── plugin/          # Plugin interface, Registry
+│   ├── utils/           # backoff (ExponentialBackoff)
 │   └── extensions/      # voicemail, ivr
 ├── config.json
 └── docs/
-    ├── ARCHITECTURE.md       # This file
-    └── SYSTEM_ARCHITECTURE.md
+    ├── ARCHITECTURE.md        # This file
+    ├── CONNECTIVITY.md
+    ├── DEPLOYMENT.md
+    ├── EXTENSIONS.md
+    ├── FRAMEWORKS.md          # external_chain, rtvi
+    ├── SYSTEM_ARCHITECTURE.md # Entry points, runner modes
+    └── WEBSOCKET_SERVICES.md  # WebSocket service base (reconnection, backoff)
 ```
 
 This document and the Mermaid diagrams can be viewed in any Markdown viewer that supports Mermaid (e.g. GitHub, VS Code with Mermaid extension).

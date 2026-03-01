@@ -41,6 +41,7 @@ import (
 	"voila-go/pkg/server"
 	"voila-go/pkg/services"
 	"voila-go/pkg/transport"
+	"voila-go/pkg/mcp"
 )
 
 func main() {
@@ -148,10 +149,18 @@ func run(configPath string, flags runFlags) error {
 	// Prefer voice pipeline if config has provider/model (LLM/STT/TTS); otherwise echo pipeline from plugins.
 	useVoice := cfg.Provider != "" && cfg.Model != ""
 
-	buildPipeline := func(tr pipeline.Transport) *pipeline.Pipeline {
+	buildPipeline := func(ctx context.Context, tr pipeline.Transport) *pipeline.Pipeline {
 		var pl *pipeline.Pipeline
 		if useVoice {
 			llm, sttSvc, ttsSvc := services.NewServicesFromConfig(cfg)
+			if cfg.MCP != nil {
+				if withTools, ok := llm.(services.LLMServiceWithTools); ok {
+					mcpClient := mcp.NewClient(mcp.StdioServerParams{Command: cfg.MCP.Command, Args: cfg.MCP.Args}, cfg.MCP.ToolsFilter, nil)
+					if _, err := mcpClient.RegisterTools(ctx, withTools); err != nil {
+						logger.Error("MCP RegisterTools: %v", err)
+					}
+				}
+			}
 			pl = pipeline.New()
 			// Composite observer for turn tracking, latency, and metrics.
 			metrics := observers.NewMetrics()
@@ -258,7 +267,7 @@ func run(configPath string, flags runFlags) error {
 	}
 
 	onTransport := func(ctx context.Context, tr transport.Transport) {
-		pl := buildPipeline(tr)
+		pl := buildPipeline(ctx, tr)
 		startFrame := frames.NewStartFrame()
 		startFrame.AllowInterruptions = cfg.AllowInterruptions
 		runner := pipeline.NewRunner(pl, tr, startFrame)

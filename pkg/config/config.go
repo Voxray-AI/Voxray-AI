@@ -104,6 +104,16 @@ type Config struct {
 
 	// ServerAPIKey when non-empty requires Authorization: Bearer <key> or X-API-Key: <key> for /start, /sessions/*, /webrtc/offer, /ws. Overridden by VOILA_SERVER_API_KEY.
 	ServerAPIKey string `json:"server_api_key,omitempty"`
+
+	// MCP configures the MCP (Model Context Protocol) client for tool integration. When set, tools from the MCP server are registered with the LLM.
+	MCP *MCPConfig `json:"mcp,omitempty"`
+}
+
+// MCPConfig configures an MCP server connection (stdio: command + args). Used to register MCP tools with the LLM.
+type MCPConfig struct {
+	Command     string   `json:"command"`               // executable (e.g. "npx", "go")
+	Args        []string `json:"args,omitempty"`        // arguments (e.g. ["-y", "mcp-server"] or ["run", "server.go"])
+	ToolsFilter []string `json:"tools_filter,omitempty"` // if non-empty, only these tool names are registered
 }
 
 // GetAPIKey returns the API key for the given service, checking the config first,
