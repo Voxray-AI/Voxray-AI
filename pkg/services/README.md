@@ -24,8 +24,11 @@ These are the providers currently implemented in this Go port.
 | aws        | ✓   | ✓   | ✓   | —        |
 | mistral    | ✓   | —   | —   | —        |
 | deepseek   | ✓   | —   | —   | —        |
+| ollama     | ✓   | —   | —   | —        |
+| qwen       | ✓   | —   | —   | —        |
+| whisper    | —   | ✓   | —   | —        |
 
-Constants: `ProviderOpenAI`, `ProviderGroq`, `ProviderSarvam`, `ProviderGrok`, `ProviderCerebras`, `ProviderElevenLabs`, `ProviderAWS`, `ProviderMistral`, `ProviderDeepSeek`. Realtime: `SupportedRealtimeProviders` (currently `"openai"`).
+Constants: `ProviderOpenAI`, `ProviderGroq`, `ProviderSarvam`, `ProviderGrok`, `ProviderCerebras`, `ProviderElevenLabs`, `ProviderAWS`, `ProviderMistral`, `ProviderDeepSeek`, `ProviderOllama`, `ProviderQwen`, `ProviderWhisper`. Realtime: `SupportedRealtimeProviders` (currently `"openai"`).
 
 ## Upstream providers and Go coverage
 
@@ -75,7 +78,7 @@ Legend:
 | neuphonic            | —            | —            | ✓            | —                 | —      | —      | —      | —           |
 | nim                  | ✓            | —            | —            | —                 | —      | —      | —      | —           |
 | nvidia               | ✓            | ✓            | ✓            | —                 | —      | —      | —      | —           |
-| ollama               | ✓            | —            | —            | —                 | —      | —      | —      | —           |
+| ollama               | ✓            | —            | —            | —                 | ✓      | —      | —      | —           |
 | openai               | ✓            | ✓            | ✓            | ✓                 | ✓      | ✓      | ✓      | ✓           |
 | openai_realtime      | ✓            | ✓            | ✓            | ✓                 | —      | —      | —      | —           |
 | openai_realtime_beta | ✓            | ✓            | ✓            | ✓                 | —      | —      | —      | —           |
@@ -83,7 +86,7 @@ Legend:
 | openrouter           | ✓            | —            | —            | —                 | —      | —      | —      | —           |
 | perplexity           | ✓            | —            | —            | —                 | —      | —      | —      | —           |
 | piper                | —            | —            | ✓            | —                 | —      | —      | —      | —           |
-| qwen                 | ✓            | —            | —            | —                 | —      | —      | —      | —           |
+| qwen                 | ✓            | —            | —            | —                 | ✓      | —      | —      | —           |
 | resembleai           | —            | —            | ✓            | —                 | —      | —      | —      | —           |
 | rime                 | —            | ✓            | —            | —                 | —      | —      | —      | —           |
 | riva                 | —            | ✓            | ✓            | —                 | —      | —      | —      | —           |
@@ -95,7 +98,7 @@ Legend:
 | tavus                | —            | —            | ✓            | ✓                 | —      | —      | —      | —           |
 | together             | ✓            | —            | —            | —                 | —      | —      | —      | —           |
 | ultravox             | —            | —            | ✓            | —                 | —      | —      | —      | —           |
-| whisper              | —            | ✓            | —            | —                 | —      | —      | —      | —           |
+| whisper              | —            | ✓            | —            | —                 | —      | ✓      | —      | —           |
 | xtts                 | —            | —            | ✓            | —                 | —      | —      | —      | —           |
 
 
@@ -122,6 +125,9 @@ Use **config.Config** (JSON or env):
 | aws       | AWS_SECRET_ACCESS_KEY, AWS_REGION (optional, default us-east-1) |
 | mistral   | MISTRAL_API_KEY |
 | deepseek  | DEEPSEEK_API_KEY |
+| ollama    | OLLAMA_API_KEY (optional), OLLAMA_BASE_URL (optional, default http://localhost:11434/v1) |
+| qwen      | DASHSCOPE_API_KEY or QWEN_API_KEY, DASHSCOPE_BASE_URL (optional) |
+| whisper   | WHISPER_API_KEY or OPENAI_API_KEY, WHISPER_BASE_URL (optional) |
 
 ## Usage
 

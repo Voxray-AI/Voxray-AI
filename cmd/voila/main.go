@@ -24,6 +24,13 @@ import (
 	"voila-go/pkg/pipeline"
 	"voila-go/pkg/processors"
 	"voila-go/pkg/processors/aggregator"
+	"voila-go/pkg/processors/aggregators/dtmf"
+	"voila-go/pkg/processors/aggregators/gated"
+	"voila-go/pkg/processors/aggregators/gatedcontext"
+	"voila-go/pkg/processors/aggregators/llmcontextsummarizer"
+	"voila-go/pkg/processors/aggregators/llmfullresponse"
+	"voila-go/pkg/processors/aggregators/llmtext"
+	"voila-go/pkg/processors/aggregators/userresponse"
 	"voila-go/pkg/processors/echo"
 	proclog "voila-go/pkg/processors/logger"
 	"voila-go/pkg/processors/voice"
@@ -35,6 +42,10 @@ import (
 func main() {
 	configPath := flag.String("config", "config.json", "Path to config file")
 	initCmd := flag.Bool("init", false, "Scaffold config.json and dirs (plugins, logs) then exit")
+	runnerTransport := flag.String("transport", "", "Runner transport type: webrtc, daily, twilio, telnyx, plivo, exotel (overrides config)")
+	runnerPort := flag.Int("port", 0, "Server port (overrides config; default 8080)")
+	proxyHost := flag.String("proxy", "", "Public proxy hostname for telephony webhook XML (e.g. mybot.ngrok.io)")
+	dialin := flag.Bool("dialin", false, "Enable Daily PSTN dial-in webhook (requires transport=daily)")
 	flag.Parse()
 	// Support subcommand: Voila init [config path]
 	if len(flag.Args()) >= 1 && flag.Arg(0) == "init" {
@@ -56,22 +67,58 @@ func main() {
 		return
 	}
 
-	if err := run(*configPath); err != nil {
+	if err := run(*configPath, runFlags{
+		transport: *runnerTransport,
+		port:      *runnerPort,
+		proxy:     *proxyHost,
+		dialin:    *dialin,
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(configPath string) error {
+type runFlags struct {
+	transport string
+	port      int
+	proxy     string
+	dialin    bool
+}
+
+func run(configPath string, flags runFlags) error {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	// Apply runner flags over config
+	if flags.transport != "" {
+		cfg.RunnerTransport = flags.transport
+	}
+	if flags.port > 0 {
+		cfg.Port = flags.port
+	}
+	if flags.proxy != "" {
+		cfg.ProxyHost = flags.proxy
+	}
+	if flags.dialin {
+		cfg.Dialin = true
 	}
 
 	// Register built-in processors for plugin registry (dynamic loading from config)
 	pipeline.RegisterProcessor("echo", func(name string) processors.Processor { return echo.New(name) })
 	pipeline.RegisterProcessor("logger", func(name string) processors.Processor { return proclog.New(name) })
 	pipeline.RegisterProcessor("aggregator", func(name string) processors.Processor { return aggregator.New(name, "", 0) })
+	pipeline.RegisterProcessor("dtmf_aggregator", func(name string) processors.Processor { return dtmf.New(name, 0, "", "") })
+	pipeline.RegisterProcessor("gated", func(name string) processors.Processor {
+		return gated.New(name, nil, nil, true, processors.Downstream)
+	})
+	pipeline.RegisterProcessor("llmfullresponse", func(name string) processors.Processor { return llmfullresponse.New(name, nil) })
+	pipeline.RegisterProcessor("llmtext", func(name string) processors.Processor { return llmtext.New(name, nil) })
+	pipeline.RegisterProcessor("userresponse", func(name string) processors.Processor { return userresponse.New(name) })
+	pipeline.RegisterProcessor("gated_llm_context", func(name string) processors.Processor { return gatedcontext.New(name, nil, false) })
+	pipeline.RegisterProcessor("llmcontextsummarizer", func(name string) processors.Processor {
+		return llmcontextsummarizer.New(name, nil, llmcontextsummarizer.DefaultConfig())
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

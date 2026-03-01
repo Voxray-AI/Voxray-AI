@@ -45,7 +45,7 @@ High-level architecture of the **voila-go** real-time voice pipeline server.
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                     PROCESSORS (pkg/processors)                                    │
 │  Turn (VAD + silence) → STT → LLM → TTS → Sink   (voice pipeline)                 │
-│  Or: plugins (echo, logger, aggregator) → Sink   (config-driven)                  │
+│  Or: plugins (echo, logger, aggregator, dtmf_aggregator, llmtext, …) → Sink        │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -181,11 +181,11 @@ sequenceDiagram
 | Layer | Package(s) | Responsibility |
 |-------|------------|----------------|
 | **Entry** | `cmd/voila` | Load config, register processors, start server, build pipeline per transport |
-| **Server** | `pkg/server` | HTTP server; WebSocket and/or SmallWebRTC; `onTransport` callback |
-| **Transport** | `pkg/transport`, `transport/websocket`, `transport/smallwebrtc` | Bidirectional frame channels (Input/Output), Start/Close |
+| **Server** | `pkg/server` | HTTP server; WebSocket `/ws` and/or SmallWebRTC `/webrtc/offer`; Pipecat-style `/start`, `/sessions/{id}/api/offer`; telephony POST `/` + `/telephony/ws`; Daily GET `/`, `/daily-dialin-webhook`; `onTransport` callback; `pkg/runner` SessionStore for runner sessions |
+| **Transport** | `pkg/transport`, `transport/websocket`, `transport/smallwebrtc`, `transport/memory`, `transport/whatsapp`; telephony via websocket + provider serializers | Bidirectional frame channels (Input/Output), Start/Close |
 | **Runner** | `pkg/pipeline` (Runner) | Connect transport to pipeline; forward input → Push; pipeline output → transport |
 | **Pipeline** | `pkg/pipeline` (Pipeline) | Linear processor chain; Setup/Cleanup; Push(StartFrame), Push(frames) |
-| **Processors** | `pkg/processors`, `processors/voice`, `processors/echo`, etc. | Turn (VAD), STT, LLM, TTS, Sink; or echo/logger/aggregator |
+| **Processors** | `pkg/processors`, `processors/voice`, `processors/echo`, `processors/aggregators/*` | Turn (VAD), STT, LLM, TTS, Sink; echo/logger/aggregator; pipecat aggregators (dtmf_aggregator, gated, llmfullresponse, llmtext, userresponse, gated_llm_context, llmcontextsummarizer) |
 | **Services** | `pkg/services`, `services/*` | LLM, STT, TTS provider implementations (OpenAI, Groq, Sarvam, AWS, …) |
 | **Frames** | `pkg/frames`, `frames/serialize` | Frame types (Start, Cancel, Audio, Text, Transcription, …); JSON / binary protobuf |
 | **Support** | `pkg/config`, `pkg/audio`, `pkg/observers`, `pkg/plugin` | Config, VAD/turn/resample, metrics, plugin registry |
@@ -212,6 +212,27 @@ When `config` has `provider` and `model`, the server builds a **voice pipeline**
 
 Otherwise, the pipeline is built from **config.Plugins** (e.g. echo, logger, aggregator) and ends with Sink.
 
+**Pipecat-style aggregators** (in `pkg/processors/aggregators/`) can be registered and used in plugin pipelines or composed with the voice pipeline:
+
+- **dtmf_aggregator**: Accumulates `InputDTMFFrame` digits; flushes as `TranscriptionFrame` on timeout, `#`, or End/Cancel. Place before LLM when using DTMF input (e.g. telephony IVR).
+- **gated**: Buffers frames when a custom gate is closed; releases when gate opens. Use for flow control.
+- **llmfullresponse**: Aggregates LLM text between `LLMFullResponseStartFrame` and `LLMFullResponseEndFrame`; calls an optional callback on completion or interruption (e.g. for voicemail/IVR).
+- **llmtext**: Converts `LLMTextFrame` → `AggregatedTextFrame` via a configurable text aggregator (e.g. sentence). Place after LLM, before TTS or sentence aggregator.
+- **userresponse**: Buffers `TranscriptionFrame` and emits one aggregated transcription on `UserStoppedSpeakingFrame` or End/Cancel. Use when the pipeline provides user-turn boundaries.
+- **gated_llm_context**: Holds `LLMContextFrame` until a notifier signals release.
+- **llmcontextsummarizer**: Monitors context size; pushes `LLMContextSummaryRequestFrame` when thresholds are exceeded; applies `LLMContextSummaryResultFrame` to compress history.
+
+---
+
+### 5.1 Runner modes and entry points
+
+- **WebSocket / WebRTC:** `transport` = `websocket`, `smallwebrtc`, or `both`. Clients use `/ws` or `POST /webrtc/offer`.
+- **Runner (Pipecat-style):** When WebRTC or Daily is enabled, `POST /start` creates a session (optionally with `createDailyRoom`); clients then send `POST` or `PATCH` to `/sessions/{sessionId}/api/offer` with SDP. SessionStore holds session body and ICE options per sessionId.
+- **Telephony:** `runner_transport` = `twilio`, `telnyx`, `plivo`, or `exotel`. Provider calls `POST /` (XML webhook); media flows over `/telephony/ws` (WebSocket with provider-specific frame serialization).
+- **Daily:** `runner_transport=daily`. `GET /` creates a room and redirects to it; optional `POST /daily-dialin-webhook` for PSTN dial-in. Room clients use the same pipeline via WebRTC.
+
+See [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md) for the full system view and entry-point table.
+
 ---
 
 ## 6. File Layout (Key Paths)
@@ -220,19 +241,23 @@ Otherwise, the pipeline is built from **config.Plugins** (e.g. echo, logger, agg
 voila-go/
 ├── cmd/voila/           # Entry: main, init
 ├── pkg/
-│   ├── server/          # StartServers, WebSocket + WebRTC
-│   ├── transport/       # Transport interface; websocket, smallwebrtc
+│   ├── server/          # StartServers; /ws, /webrtc/offer, /start, /sessions, telephony, Daily routes
+│   ├── transport/       # Transport interface; websocket (server + client), smallwebrtc, memory, whatsapp; base
 │   ├── pipeline/        # Pipeline, Runner, Source, Sink, Registry
-│   ├── processors/      # Processor interface; voice (Turn, STT, LLM, TTS), echo, aggregator, logger
-│   ├── services/        # Factory; LLM/STT/TTS providers (openai, groq, sarvam, aws, …)
-│   ├── frames/          # Frame types; serialize (JSON, binary protobuf)
+│   ├── processors/      # Processor interface; voice (Turn, STT, LLM, TTS), echo, aggregator, logger; aggregators (dtmf, gated, llmfullresponse, llmtext, userresponse, gatedcontext, llmcontextsummarizer)
+│   ├── services/        # Factory; LLM/STT/TTS providers; RealtimeService (use realtime.NewFromConfig)
+│   ├── realtime/        # OpenAI Realtime API (RealtimeSession, RealtimeService)
+│   ├── runner/          # SessionStore; daily (room/token); telephony message parsing, serializers
+│   ├── frames/          # Frame types; serialize (JSON, binary protobuf; twilio, telnyx, plivo, exotel, …)
 │   ├── config/          # Config, LoadConfig
-│   ├── audio/            # VAD, turn, resample, wav
-│   ├── observers/        # ObservingProcessor, metrics
-│   └── plugin/           # Plugin interface, Registry
+│   ├── audio/           # VAD, turn, resample, wav
+│   ├── observers/       # ObservingProcessor, metrics, turn tracking, user-bot latency
+│   ├── plugin/          # Plugin interface, Registry
+│   └── extensions/      # voicemail, ivr
 ├── config.json
 └── docs/
-    └── ARCHITECTURE.md   # This file
+    ├── ARCHITECTURE.md       # This file
+    └── SYSTEM_ARCHITECTURE.md
 ```
 
 This document and the Mermaid diagrams can be viewed in any Markdown viewer that supports Mermaid (e.g. GitHub, VS Code with Mermaid extension).

@@ -53,6 +53,8 @@ func (f *fakeAnalyzer) Clear() {
 
 func (f *fakeAnalyzer) UpdateVADStartSecs(_ float64) {}
 
+func (f *fakeAnalyzer) UpdateParams(_ turn.Params) {}
+
 type collectProcessor struct {
 	received []frames.Frame
 }

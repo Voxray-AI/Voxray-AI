@@ -14,8 +14,9 @@ import (
 	"voila-go/pkg/logger"
 )
 
-// ClientTransport is an outbound WebSocket transport that connects to a pipeline server.
+// ClientTransport is an outbound WebSocket transport that connects to a Voila server.
 // It implements transport.Transport: Input receives frames from the server, Output sends frames to the server.
+// Close is idempotent; do not send on Output after Close.
 type ClientTransport struct {
 	url    *url.URL
 	conn   *websocket.Conn
@@ -25,14 +26,16 @@ type ClientTransport struct {
 	once   sync.Once
 }
 
-// ClientConfig configures the WebSocket client transport.
+// ClientConfig configures the WebSocket client.
+// InBufSize and OutBufSize set the Input and Output channel capacities; zero or negative values are replaced by 64.
 type ClientConfig struct {
 	InBufSize  int
 	OutBufSize int
 }
 
-// NewClientTransport creates a client transport that will connect to the given WebSocket URL (e.g. ws://host/ws or wss://host/ws).
-// Connect is performed when Start is called. If inBufSize or outBufSize are <= 0, 64 is used.
+// NewClientTransport creates a client transport for the given WebSocket URL (e.g. ws://host/ws or wss://host/ws).
+// The connection is established when Start is called.
+// Returns an error if the URL is invalid or the scheme is not ws or wss.
 func NewClientTransport(wsURL string, cfg *ClientConfig) (*ClientTransport, error) {
 	u, err := url.Parse(wsURL)
 	if err != nil {
@@ -59,13 +62,16 @@ func NewClientTransport(wsURL string, cfg *ClientConfig) (*ClientTransport, erro
 }
 
 // Input returns the channel of frames received from the server.
+// Closed when the transport is closed.
 func (t *ClientTransport) Input() <-chan frames.Frame { return t.inCh }
 
 // Output returns the channel to send frames to the server.
+// Do not send after Close.
 func (t *ClientTransport) Output() chan<- frames.Frame { return t.outCh }
 
-// Start dials the WebSocket URL and starts read/write loops. Returns an error if the connection fails.
-// The provided context is used for the dial and for shutdown; when it is canceled, the transport is closed.
+// Start dials the WebSocket URL and starts the read and write loops.
+// Returns an error if the context is nil or the dial fails.
+// When ctx is canceled, the transport is closed.
 func (t *ClientTransport) Start(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("websocket client: nil context passed to Start")
@@ -88,7 +94,8 @@ func (t *ClientTransport) Start(ctx context.Context) error {
 	return nil
 }
 
-// Close closes the connection and channels.
+// Close closes the connection and the Input/Output channels.
+// Idempotent; safe to call from any goroutine.
 func (t *ClientTransport) Close() error {
 	var err error
 	t.once.Do(func() {

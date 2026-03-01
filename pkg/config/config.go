@@ -58,9 +58,19 @@ type Config struct {
 	VADMinVolume    float64 `json:"vad_min_volume,omitempty"`     // default 0.6
 
 	// Interruption: allow user to interrupt bot; strategy (e.g. "keyword") and min_words for future use.
-	AllowInterruptions  bool   `json:"allow_interruptions,omitempty"`
+	AllowInterruptions   bool   `json:"allow_interruptions,omitempty"`
 	InterruptionStrategy string `json:"interruption_strategy,omitempty"`
-	MinWords            int    `json:"min_words,omitempty"`
+	MinWords             int    `json:"min_words,omitempty"`
+
+	// Runner: Pipecat-style development runner (transport type, port, proxy for telephony).
+	// RunnerTransport: "webrtc" | "daily" | "twilio" | "telnyx" | "plivo" | "exotel" | "livekit" | "" (use Transport + /ws as before).
+	RunnerTransport string `json:"runner_transport,omitempty"`
+	// RunnerPort overrides Port when runner is used (default 8080; Python runner uses 7860).
+	RunnerPort int `json:"runner_port,omitempty"`
+	// ProxyHost is the public hostname for telephony webhook XML (e.g. mybot.ngrok.io). No protocol.
+	ProxyHost string `json:"proxy_host,omitempty"`
+	// Dialin enables Daily PSTN dial-in webhook (POST /daily-dialin-webhook). Only with runner_transport=daily.
+	Dialin bool `json:"dialin,omitempty"`
 }
 
 // GetAPIKey returns the API key for the given service, checking the config first,

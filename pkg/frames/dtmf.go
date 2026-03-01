@@ -38,6 +38,29 @@ func ParseKeypadEntry(s string) (KeypadEntry, error) {
 // String returns the keypad character as string.
 func (k KeypadEntry) String() string { return string(k) }
 
+// InputDTMFFrame carries an inbound DTMF keypress from the transport (e.g. telephony).
+// Pipeline/processors can use this for IVR or user input.
+type InputDTMFFrame struct {
+	ControlFrame
+	Digit KeypadEntry `json:"digit"`
+}
+
+func (*InputDTMFFrame) FrameType() string { return "InputDTMFFrame" }
+
+// NewInputDTMFFrame creates an InputDTMFFrame. Returns error if digit is not valid (0-9, *, #).
+func NewInputDTMFFrame(digit KeypadEntry) (*InputDTMFFrame, error) {
+	if digit == "" {
+		return nil, fmt.Errorf("digit cannot be empty")
+	}
+	if !strings.ContainsRune(ValidKeypadRunes, rune(digit[0])) {
+		return nil, fmt.Errorf("invalid DTMF digit: %q", digit)
+	}
+	return &InputDTMFFrame{
+		ControlFrame: ControlFrame{Base: NewBase()},
+		Digit:        digit,
+	}, nil
+}
+
 // OutputDTMFUrgentFrame carries a DTMF keypress for the transport to play
 // (e.g. for IVR navigation). Transport implementations may emit the actual
 // DTMF tone or forward it to the telephony layer.

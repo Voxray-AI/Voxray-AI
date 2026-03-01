@@ -58,8 +58,9 @@ const (
 	opusFrameSize    = opusFrameSamples * 2 // 16-bit
 )
 
-// Transport implements transport.Transport for WebRTC: frames from the pipeline are sent over a local track,
-// and frames received from the remote track are pushed to Input.
+// Transport implements transport.Transport for WebRTC.
+// Input receives frames from the remote peer (e.g. decoded mic audio); Output sends frames to the remote peer (e.g. TTS).
+// One transport per peer connection. Close is idempotent; do not send on Output after Close.
 type Transport struct {
 	cfg              *Config
 	pc               *webrtc.PeerConnection
@@ -71,12 +72,15 @@ type Transport struct {
 	inboundChunkCount uint64 // total audio chunks pushed to pipeline (for STT)
 }
 
-// Config holds SmallWebRTC transport configuration.
+// Config holds SmallWebRTC options.
+// ICEServers is the list of STUN/TURN server URLs; if empty, a default STUN server is used.
 type Config struct {
 	ICEServers []string
 }
 
-// NewTransport creates a new SmallWebRTC transport. Call HandleOffer with the client's SDP offer to establish the connection.
+// NewTransport creates a new WebRTC transport.
+// Call HandleOffer with the client SDP offer to establish the connection, then Start.
+// The transport is not connected until HandleOffer succeeds.
 func NewTransport(cfg *Config) *Transport {
 	return &Transport{
 		cfg:    cfg,
@@ -87,15 +91,17 @@ func NewTransport(cfg *Config) *Transport {
 }
 
 // Input returns the channel of frames received from the remote peer (e.g. audio decoded to AudioRawFrame).
+// Closed when the transport is closed.
 func (t *Transport) Input() <-chan frames.Frame { return t.inCh }
 
 // Output returns the channel to send frames to the remote peer (e.g. TTSAudioRawFrame).
+// Do not send after Close.
 func (t *Transport) Output() chan<- frames.Frame { return t.outCh }
 
-// HandleOffer sets the remote description from the client's offer, creates an answer, and sets up the peer connection.
-// Returns the SDP answer to send back to the client. Must be called before Start.
-// When Opus encoder is unavailable (e.g. build without cgo), the connection is still accepted; mic audio is processed
-// and the pipeline runs (STT → LLM → TTS), but TTS audio is drained and not sent to the client.
+// HandleOffer sets the remote description from the client SDP offer, creates an answer, and sets up the peer connection.
+// It returns the SDP answer to send back to the client. Must be called before Start.
+// If the Opus encoder is unavailable (e.g. build without cgo), the connection is still accepted and mic audio is processed, but TTS audio is not sent to the client.
+// Not safe to call concurrently with other methods on the same Transport.
 func (t *Transport) HandleOffer(offerSDP string) (answerSDP string, err error) {
 	logger.Info("webrtc: offer received from client")
 	if !OutboundEncoderAvailable() {
@@ -258,7 +264,8 @@ var outboundRunner = runOutboundDrain
 // outboundEncoderAvailable is set true by opus_outbound_cgo.go when the Opus encoder is built in.
 var outboundEncoderAvailable bool
 
-// OutboundEncoderAvailable reports whether TTS can be sent over the outbound track (requires cgo build).
+// OutboundEncoderAvailable reports whether TTS audio can be sent over the outbound track.
+// It is false when built without cgo (Opus encoder unavailable); in that case HandleOffer still succeeds but TTS is drained locally.
 func OutboundEncoderAvailable() bool { return outboundEncoderAvailable }
 
 // drainTTSFramesUntilNonTTS reads from outCh and discards TTSAudioRawFrame (and duplicate UserStartedSpeakingFrame).
@@ -305,7 +312,9 @@ func (t *Transport) runOutbound(track *webrtc.TrackLocalStaticSample) {
 
 func (t *Transport) getConfig() *Config { return t.cfg }
 
-// Start starts the transport. HandleOffer must have been called first. Start returns once the connection is set up.
+// Start starts the transport. HandleOffer must have been called first.
+// Returns an error if the peer connection was not initialized.
+// When ctx is canceled, the transport is closed.
 func (t *Transport) Start(ctx context.Context) error {
 	if t.pc == nil {
 		return fmt.Errorf("smallwebrtc: HandleOffer must be called before Start")
@@ -320,7 +329,8 @@ func (t *Transport) Start(ctx context.Context) error {
 	return nil
 }
 
-// Close closes the peer connection and channels.
+// Close closes the peer connection and the Input/Output channels.
+// Idempotent; safe to call from any goroutine.
 func (t *Transport) Close() error {
 	var err error
 	t.once.Do(func() {

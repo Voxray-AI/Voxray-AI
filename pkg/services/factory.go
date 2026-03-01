@@ -13,26 +13,35 @@ import (
 	"voila-go/pkg/services/cerebras"
 	"voila-go/pkg/services/deepseek"
 	"voila-go/pkg/services/elevenlabs"
+	"voila-go/pkg/services/google"
 	"voila-go/pkg/services/grok"
 	"voila-go/pkg/services/groq"
 	"voila-go/pkg/services/mistral"
+	"voila-go/pkg/services/ollama"
 	"voila-go/pkg/services/openai"
+	"voila-go/pkg/services/qwen"
 	"voila-go/pkg/services/sarvam"
 	"voila-go/pkg/services/stt"
 	"voila-go/pkg/services/tts"
+	"voila-go/pkg/services/whisper"
 )
 
 const (
-	ProviderOpenAI     = "openai"
-	ProviderGroq       = "groq"
-	ProviderSarvam     = "sarvam"
-	ProviderGrok       = "grok"
-	ProviderCerebras   = "cerebras"
-	ProviderElevenLabs = "elevenlabs"
-	ProviderAWS        = "aws"
-	ProviderMistral    = "mistral"
-	ProviderDeepSeek   = "deepseek"
-	ProviderAnthropic  = "anthropic"
+	ProviderOpenAI        = "openai"
+	ProviderGroq          = "groq"
+	ProviderSarvam       = "sarvam"
+	ProviderGrok          = "grok"
+	ProviderCerebras      = "cerebras"
+	ProviderElevenLabs   = "elevenlabs"
+	ProviderAWS          = "aws"
+	ProviderMistral       = "mistral"
+	ProviderDeepSeek      = "deepseek"
+	ProviderAnthropic     = "anthropic"
+	ProviderGoogle        = "google"
+	ProviderGoogleVertex  = "google_vertex"
+	ProviderOllama        = "ollama"
+	ProviderQwen          = "qwen"
+	ProviderWhisper       = "whisper"
 )
 
 // SupportedLLMProviders lists provider keys that can be passed to NewLLMFromConfig.
@@ -45,13 +54,17 @@ var SupportedLLMProviders = []string{
 	ProviderMistral,
 	ProviderDeepSeek,
 	ProviderAnthropic,
+	ProviderGoogle,
+	ProviderGoogleVertex,
+	ProviderOllama,
+	ProviderQwen,
 }
 
 // SupportedSTTProviders lists provider keys that can be passed to NewSTTFromConfig.
-var SupportedSTTProviders = []string{ProviderOpenAI, ProviderGroq, ProviderSarvam, ProviderElevenLabs, ProviderAWS}
+var SupportedSTTProviders = []string{ProviderOpenAI, ProviderGroq, ProviderSarvam, ProviderElevenLabs, ProviderAWS, ProviderGoogle, ProviderWhisper}
 
 // SupportedTTSProviders lists provider keys that can be passed to NewTTSFromConfig.
-var SupportedTTSProviders = []string{ProviderOpenAI, ProviderGroq, ProviderSarvam, ProviderElevenLabs, ProviderAWS}
+var SupportedTTSProviders = []string{ProviderOpenAI, ProviderGroq, ProviderSarvam, ProviderElevenLabs, ProviderAWS, ProviderGoogle}
 
 // SupportedRealtimeProviders lists provider keys for realtime (use realtime.NewFromConfig to construct).
 var SupportedRealtimeProviders = []string{ProviderOpenAI}
@@ -79,9 +92,46 @@ func apiKeyForProvider(cfg *config.Config, provider string) string {
 		return cfg.GetAPIKey("deepseek", "DEEPSEEK_API_KEY")
 	case ProviderOpenAI:
 		return cfg.GetAPIKey("openai", "OPENAI_API_KEY")
+	case ProviderGoogle:
+		return cfg.GetAPIKey("google", "GOOGLE_API_KEY")
+	case ProviderGoogleVertex:
+		return "" // Vertex uses ADC, no API key
+	case ProviderOllama:
+		return cfg.GetAPIKey("ollama", "OLLAMA_API_KEY")
+	case ProviderQwen:
+		key := cfg.GetAPIKey("qwen", "DASHSCOPE_API_KEY")
+		if key == "" {
+			key = cfg.GetAPIKey("qwen", "QWEN_API_KEY")
+		}
+		return key
+	case ProviderWhisper:
+		key := cfg.GetAPIKey("whisper", "WHISPER_API_KEY")
+		if key == "" {
+			key = cfg.GetAPIKey("openai", "OPENAI_API_KEY")
+		}
+		return key
 	default:
 		return cfg.GetAPIKey(provider, "OPENAI_API_KEY")
 	}
+}
+
+func getGoogleProject(cfg *config.Config) string {
+	p := cfg.GetAPIKey("google_cloud_project", "GOOGLE_CLOUD_PROJECT")
+	if p == "" {
+		p = cfg.GetAPIKey("google_project", "GOOGLE_CLOUD_PROJECT")
+	}
+	return p
+}
+
+func getGoogleLocation(cfg *config.Config) string {
+	l := cfg.GetAPIKey("google_cloud_location", "GOOGLE_CLOUD_LOCATION")
+	if l == "" {
+		l = cfg.GetAPIKey("google_location", "GOOGLE_CLOUD_LOCATION")
+	}
+	if l == "" {
+		return "us-central1"
+	}
+	return l
 }
 
 func getAWSRegion(cfg *config.Config) string {
@@ -115,6 +165,22 @@ func NewLLMFromConfig(cfg *config.Config, provider, model string) LLMService {
 		return mistral.NewLLMService(apiKey, model)
 	case ProviderDeepSeek:
 		return deepseek.NewLLMService(apiKey, model)
+	case ProviderGoogle:
+		svc, err := google.NewLLMService(context.Background(), apiKey, model)
+		if err != nil {
+			return nil
+		}
+		return svc
+	case ProviderGoogleVertex:
+		svc, err := google.NewVertexLLMService(context.Background(), getGoogleProject(cfg), getGoogleLocation(cfg), model)
+		if err != nil {
+			return nil
+		}
+		return svc
+	case ProviderOllama:
+		return ollama.NewLLMService(apiKey, model)
+	case ProviderQwen:
+		return qwen.NewLLMService(apiKey, model)
 	case ProviderOpenAI:
 		fallthrough
 	default:
@@ -142,6 +208,14 @@ func NewSTTFromConfig(cfg *config.Config, provider string) STTService {
 			return nil
 		}
 		return svc
+	case ProviderGoogle:
+		svc, err := google.NewSTT(context.Background(), getGoogleProject(cfg), getGoogleLocation(cfg), cfg.STTModel, cfg.STTLanguage)
+		if err != nil {
+			return nil
+		}
+		return svc
+	case ProviderWhisper:
+		return whisper.NewService(apiKey, config.GetEnv("WHISPER_BASE_URL", ""))
 	case ProviderOpenAI:
 		fallthrough
 	default:
@@ -165,6 +239,16 @@ func NewTTSFromConfig(cfg *config.Config, provider, model, voice string) TTSServ
 			voice = "Joanna"
 		}
 		svc, err := aws.NewTTSWithRegion(context.Background(), getAWSRegion(cfg), voice, "")
+		if err != nil {
+			return nil
+		}
+		return svc
+	case ProviderGoogle:
+		lang := cfg.STTLanguage
+		if lang == "" {
+			lang = "en-US"
+		}
+		svc, err := google.NewTTS(context.Background(), lang, voice)
 		if err != nil {
 			return nil
 		}

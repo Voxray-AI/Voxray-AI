@@ -130,6 +130,19 @@ type StopFrame struct {
 
 func (*StopFrame) FrameType() string { return "StopFrame" }
 
+// InterruptionFrame signals the transport to clear the playback buffer (barge-in).
+// Used by telephony serializers (Twilio, Telnyx, Plivo, Vonage, Exotel) for "clear" events.
+type InterruptionFrame struct {
+	ControlFrame
+}
+
+func (*InterruptionFrame) FrameType() string { return "InterruptionFrame" }
+
+// NewInterruptionFrame creates an InterruptionFrame.
+func NewInterruptionFrame() *InterruptionFrame {
+	return &InterruptionFrame{ControlFrame: ControlFrame{Base: NewBase()}}
+}
+
 // NewStopFrame creates a StopFrame.
 func NewStopFrame() *StopFrame {
 	return &StopFrame{SystemFrame: SystemFrame{Base: NewBase()}}

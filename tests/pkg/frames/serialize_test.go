@@ -96,3 +96,43 @@ func TestTransportMessageFrameRoundTrip(t *testing.T) {
 	}
 }
 
+// TestInterruptionFrameRoundTrip verifies InterruptionFrame encode/decode.
+func TestInterruptionFrameRoundTrip(t *testing.T) {
+	f := frames.NewInterruptionFrame()
+	data, err := serialize.Encoder(f)
+	if err != nil {
+		t.Fatalf("Encoder: %v", err)
+	}
+	decoded, err := serialize.Decoder(data)
+	if err != nil {
+		t.Fatalf("Decoder: %v", err)
+	}
+	if _, ok := decoded.(*frames.InterruptionFrame); !ok {
+		t.Fatalf("expected *frames.InterruptionFrame, got %T", decoded)
+	}
+}
+
+// TestInputDTMFFrameRoundTrip verifies InputDTMFFrame encode/decode.
+func TestInputDTMFFrameRoundTrip(t *testing.T) {
+	kp, _ := frames.ParseKeypadEntry("5")
+	f, err := frames.NewInputDTMFFrame(kp)
+	if err != nil {
+		t.Fatalf("NewInputDTMFFrame: %v", err)
+	}
+	data, err := serialize.Encoder(f)
+	if err != nil {
+		t.Fatalf("Encoder: %v", err)
+	}
+	decoded, err := serialize.Decoder(data)
+	if err != nil {
+		t.Fatalf("Decoder: %v", err)
+	}
+	in, ok := decoded.(*frames.InputDTMFFrame)
+	if !ok {
+		t.Fatalf("expected *frames.InputDTMFFrame, got %T", decoded)
+	}
+	if in.Digit != kp {
+		t.Fatalf("expected digit %q, got %q", kp, in.Digit)
+	}
+}
+
