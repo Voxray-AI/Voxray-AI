@@ -85,3 +85,8 @@ func (s *RedisSessionStore) Delete(id string) error {
 	}
 	return nil
 }
+
+// Ping checks Redis connectivity. Used for readiness probes when session_store is redis.
+func (s *RedisSessionStore) Ping(ctx context.Context) error {
+	return s.client.Ping(ctx).Err()
+}

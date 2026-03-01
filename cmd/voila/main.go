@@ -40,7 +40,11 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "config.json", "Path to config file")
+	defaultConfig := "config.json"
+	if e := os.Getenv("VOILA_CONFIG"); e != "" {
+		defaultConfig = e
+	}
+	configPath := flag.String("config", defaultConfig, "Path to config file")
 	initCmd := flag.Bool("init", false, "Scaffold config.json and dirs (plugins, logs) then exit")
 	runnerTransport := flag.String("transport", "", "Runner transport type: webrtc, daily, twilio, telnyx, plivo, exotel (overrides config)")
 	runnerPort := flag.Int("port", 0, "Server port (overrides config; default 8080)")
@@ -90,6 +94,7 @@ func run(configPath string, flags runFlags) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	logger.Configure(cfg.LogLevel, cfg.JSONLogs)
 	// Apply runner flags over config
 	if flags.transport != "" {
 		cfg.RunnerTransport = flags.transport

@@ -263,5 +263,6 @@ flowchart LR
 ## 7. References
 
 - **Full architecture:** [ARCHITECTURE.md](./ARCHITECTURE.md) — components, Mermaid diagrams, data flow, file layout.
+- **Deployment:** [DEPLOYMENT.md](./DEPLOYMENT.md) — production deployment, env vars, health, TLS, scaling, security.
 - **Extensions:** [EXTENSIONS.md](./EXTENSIONS.md) — adding processors and transports.
 - **API:** [swagger.yaml](./swagger.yaml) / [swagger.json](./swagger.json).

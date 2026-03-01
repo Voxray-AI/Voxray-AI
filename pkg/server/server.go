@@ -4,9 +4,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/swaggo/http-swagger"
@@ -42,9 +44,76 @@ type webrtcOfferResponse struct {
 // @Router /webrtc/offer [post]
 func WebrtcOfferDoc() {}
 
+// setCORS sets CORS headers. When allowed is nil (not in config), sets Allow-Origin to * for backward compatibility.
+// When allowed is non-empty, sets Access-Control-Allow-Origin to the request's Origin only if it is in the list.
+func setCORS(w http.ResponseWriter, r *http.Request, allowed []string, methods string) {
+	if allowed == nil {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	} else if len(allowed) > 0 {
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		for _, o := range allowed {
+			if o == origin {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				break
+			}
+		}
+	}
+	w.Header().Set("Access-Control-Allow-Methods", methods)
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+// bodyReader returns r.Body, optionally wrapped with MaxBytesReader when maxBytes > 0.
+func bodyReader(r *http.Request, w http.ResponseWriter, maxBytes int64) io.Reader {
+	if maxBytes <= 0 {
+		return r.Body
+	}
+	return http.MaxBytesReader(w, r.Body, maxBytes)
+}
+
 // registerHandlers registers the web file server (when web/ exists), Swagger, Pipecat-style /start and /sessions when WebRTC is enabled, and the WebRTC /webrtc/offer handler on mux.
 func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore) {
-	// Swagger first
+	// Health (liveness): always 200 when process is up
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	// Metrics (Prometheus text format)
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		// Minimal Prometheus export: process up, optional counters can be added later.
+		_, _ = w.Write([]byte("# HELP voila_up 1 if the server is running.\n# TYPE voila_up gauge\nvoila_up 1\n"))
+	})
+	// Readiness: 200 when ready; if session store is Redis, check connectivity and return 503 when unreachable
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if sessionStore != nil {
+			if redisStore, ok := sessionStore.(*runner.RedisSessionStore); ok {
+				if err := redisStore.Ping(r.Context()); err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_ = json.NewEncoder(w).Encode(map[string]string{"status": "unavailable", "error": err.Error()})
+					return
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	// Swagger
 	mux.Handle("/swagger/", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),
 		httpSwagger.DeepLinking(true),
@@ -63,60 +132,56 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 	}
 	if enableWebRTC {
 		mux.HandleFunc("/webrtc/offer", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		defer r.Body.Close()
+			setCORS(w, r, cfg.CORSAllowedOrigins, "POST, OPTIONS")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			defer r.Body.Close()
 
-		var req struct {
-			Offer string `json:"offer"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Offer == "" {
-			http.Error(w, "invalid offer payload", http.StatusBadRequest)
-			return
-		}
+			var req struct {
+				Offer string `json:"offer"`
+			}
+			body := bodyReader(r, w, cfg.MaxRequestBodyBytes)
+			if err := json.NewDecoder(body).Decode(&req); err != nil || req.Offer == "" {
+				http.Error(w, "invalid offer payload", http.StatusBadRequest)
+				return
+			}
 
-		tr := smallwebrtc.NewTransport(&smallwebrtc.Config{
-			ICEServers: cfg.WebRTCICEServers,
-		})
-		answer, err := tr.HandleOffer(req.Offer)
-		if err != nil {
-			logger.Error("smallwebrtc handle offer: %v", err)
-			// Return 503 with error message when server cannot send TTS (e.g. Opus encoder unavailable)
+			tr := smallwebrtc.NewTransport(&smallwebrtc.Config{
+				ICEServers: cfg.WebRTCICEServers,
+			})
+			answer, err := tr.HandleOffer(req.Offer)
+			if err != nil {
+				logger.Error("smallwebrtc handle offer: %v", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(w).Encode(struct {
+					Error string `json:"error"`
+				}{Error: err.Error()})
+				return
+			}
+			if err := tr.Start(ctx); err != nil {
+				logger.Error("smallwebrtc start: %v", err)
+				http.Error(w, "failed to start transport", http.StatusInternalServerError)
+				return
+			}
+
+			if onTransport != nil {
+				go onTransport(ctx, tr)
+			}
+
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_ = json.NewEncoder(w).Encode(struct {
-				Error string `json:"error"`
-			}{Error: err.Error()})
-			return
-		}
-		if err := tr.Start(ctx); err != nil {
-			logger.Error("smallwebrtc start: %v", err)
-			http.Error(w, "failed to start transport", http.StatusInternalServerError)
-			return
-		}
-
-		if onTransport != nil {
-			go onTransport(ctx, tr)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(struct {
-			Answer string `json:"answer"`
-		}{
-			Answer: answer,
-		}); err != nil {
-			logger.Error("encode webrtc answer: %v", err)
-		}
-	})
+			if err := json.NewEncoder(w).Encode(struct {
+				Answer string `json:"answer"`
+			}{Answer: answer}); err != nil {
+				logger.Error("encode webrtc answer: %v", err)
+			}
+		})
 	}
 	// Telephony routes (Pipecat runner: twilio, telnyx, plivo, exotel)
 	registerTelephonyRoutes(mux, cfg, ctx, onTransport)
@@ -130,6 +195,17 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 	if !telephonyMode && !dailyMode {
 		if st, err := os.Stat("web"); err == nil && st.IsDir() {
 			mux.Handle("/", http.FileServer(http.Dir("web")))
+		} else {
+			// No other root handler: provide minimal response so GET / has a defined behavior (e.g. health checks)
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+			})
 		}
 	}
 }
@@ -300,9 +376,7 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 // registerRunnerWebRTCRoutes adds POST /start and POST/PATCH /sessions/{id}/api/offer (Pipecat Cloud-style).
 func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), store runner.SessionStore) {
 	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		setCORS(w, r, cfg.CORSAllowedOrigins, "POST, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -313,11 +387,11 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 		}
 		defer r.Body.Close()
 		var req struct {
-			CreateDailyRoom        bool                   `json:"createDailyRoom"`
-			EnableDefaultIceServers bool                  `json:"enableDefaultIceServers"`
-			Body                   map[string]interface{} `json:"body"`
+			CreateDailyRoom         bool                   `json:"createDailyRoom"`
+			EnableDefaultIceServers bool                   `json:"enableDefaultIceServers"`
+			Body                    map[string]interface{} `json:"body"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(bodyReader(r, w, cfg.MaxRequestBodyBytes)).Decode(&req)
 		// Daily: create room + token and return dailyRoom, dailyToken, sessionId
 		if req.CreateDailyRoom {
 			opts := daily.Options{
@@ -389,12 +463,10 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 			return
 		}
 		if r.URL.Path != "/sessions/"+sessionID+"/api/offer" {
-			w.WriteHeader(http.StatusOK)
+			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, PATCH, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		setCORS(w, r, cfg.CORSAllowedOrigins, "POST, PATCH, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -411,14 +483,15 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 		}
 		defer r.Body.Close()
 		var offerReq struct {
-			SDP         string                 `json:"sdp"`
-			Type        string                 `json:"type"`
-			PCID        string                 `json:"pc_id"`
-			RestartPC   bool                   `json:"restart_pc"`
-			RequestData map[string]interface{} `json:"request_data"`
-			RequestDataAlt map[string]interface{} `json:"requestData"`
+			SDP              string                 `json:"sdp"`
+			Type             string                 `json:"type"`
+			PCID             string                 `json:"pc_id"`
+			RestartPC        bool                   `json:"restart_pc"`
+			RequestData      map[string]interface{} `json:"request_data"`
+			RequestDataAlt   map[string]interface{} `json:"requestData"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&offerReq); err != nil || offerReq.SDP == "" {
+		body := bodyReader(r, w, cfg.MaxRequestBodyBytes)
+		if err := json.NewDecoder(body).Decode(&offerReq); err != nil || offerReq.SDP == "" {
 			http.Error(w, "invalid WebRTC request", http.StatusBadRequest)
 			return
 		}
@@ -492,8 +565,16 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 			registerHandlers(mux, cfg, ctx, onTransport, sessionStore)
 		},
 	}
+	if cfg.TLSEnable && cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+		server.TLSCertFile = cfg.TLSCertFile
+		server.TLSKeyFile = cfg.TLSKeyFile
+	}
 
-	logger.Info("starting server on %s:%d (transport=%s)", cfg.Host, port, mode)
+	tlsMode := ""
+	if server.TLSCertFile != "" {
+		tlsMode = " tls=on"
+	}
+	logger.Info("starting server on %s:%d (transport=%s)%s", cfg.Host, port, mode, tlsMode)
 	return server.ListenAndServe(ctx)
 }
 

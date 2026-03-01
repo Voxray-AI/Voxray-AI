@@ -1,0 +1,32 @@
+# Optional docker-compose for local development or single-node deployment.
+# For production, use orchestration (Kubernetes, etc.) and set env vars or mount config.
+
+services:
+  voila:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - VOILA_CONFIG=/app/config.json
+      # Override with env or config file: PORT, HOST, VOILA_LOG_LEVEL, VOILA_JSON_LOGS
+      # - PORT=8080
+      # - VOILA_LOG_LEVEL=info
+    volumes:
+      - ./config.json:/app/config.json:ro
+    # Optional: use Redis for session store when scaling horizontally
+    # depends_on:
+    #   - redis
+    # environment:
+    #   - session_store=redis
+    #   - redis_url=redis://redis:6379/0
+
+  # Uncomment to use Redis-backed session store (horizontal scaling)
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+
+# volumes:
+#   redis_data:
