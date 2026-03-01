@@ -181,8 +181,8 @@ sequenceDiagram
 | Layer | Package(s) | Responsibility |
 |-------|------------|----------------|
 | **Entry** | `cmd/voila` | Load config, register processors, start server, build pipeline per transport |
-| **Server** | `pkg/server` | HTTP server; WebSocket and/or SmallWebRTC; `onTransport` callback |
-| **Transport** | `pkg/transport`, `transport/websocket`, `transport/smallwebrtc` | Bidirectional frame channels (Input/Output), Start/Close |
+| **Server** | `pkg/server` | HTTP server; WebSocket `/ws` and/or SmallWebRTC `/webrtc/offer`; Pipecat-style `/start`, `/sessions/{id}/api/offer`; telephony POST `/` + `/telephony/ws`; Daily GET `/`, `/daily-dialin-webhook`; `onTransport` callback; `pkg/runner` SessionStore for runner sessions |
+| **Transport** | `pkg/transport`, `transport/websocket`, `transport/smallwebrtc`, `transport/memory`, `transport/whatsapp`; telephony via websocket + provider serializers | Bidirectional frame channels (Input/Output), Start/Close |
 | **Runner** | `pkg/pipeline` (Runner) | Connect transport to pipeline; forward input → Push; pipeline output → transport |
 | **Pipeline** | `pkg/pipeline` (Pipeline) | Linear processor chain; Setup/Cleanup; Push(StartFrame), Push(frames) |
 | **Processors** | `pkg/processors`, `processors/voice`, `processors/echo`, `processors/aggregators/*` | Turn (VAD), STT, LLM, TTS, Sink; echo/logger/aggregator; pipecat aggregators (dtmf_aggregator, gated, llmfullresponse, llmtext, userresponse, gated_llm_context, llmcontextsummarizer) |
@@ -224,25 +224,40 @@ Otherwise, the pipeline is built from **config.Plugins** (e.g. echo, logger, agg
 
 ---
 
+### 5.1 Runner modes and entry points
+
+- **WebSocket / WebRTC:** `transport` = `websocket`, `smallwebrtc`, or `both`. Clients use `/ws` or `POST /webrtc/offer`.
+- **Runner (Pipecat-style):** When WebRTC or Daily is enabled, `POST /start` creates a session (optionally with `createDailyRoom`); clients then send `POST` or `PATCH` to `/sessions/{sessionId}/api/offer` with SDP. SessionStore holds session body and ICE options per sessionId.
+- **Telephony:** `runner_transport` = `twilio`, `telnyx`, `plivo`, or `exotel`. Provider calls `POST /` (XML webhook); media flows over `/telephony/ws` (WebSocket with provider-specific frame serialization).
+- **Daily:** `runner_transport=daily`. `GET /` creates a room and redirects to it; optional `POST /daily-dialin-webhook` for PSTN dial-in. Room clients use the same pipeline via WebRTC.
+
+See [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md) for the full system view and entry-point table.
+
+---
+
 ## 6. File Layout (Key Paths)
 
 ```
 voila-go/
 ├── cmd/voila/           # Entry: main, init
 ├── pkg/
-│   ├── server/          # StartServers, WebSocket + WebRTC
-│   ├── transport/       # Transport interface; websocket, smallwebrtc
+│   ├── server/          # StartServers; /ws, /webrtc/offer, /start, /sessions, telephony, Daily routes
+│   ├── transport/       # Transport interface; websocket (server + client), smallwebrtc, memory, whatsapp; base
 │   ├── pipeline/        # Pipeline, Runner, Source, Sink, Registry
 │   ├── processors/      # Processor interface; voice (Turn, STT, LLM, TTS), echo, aggregator, logger; aggregators (dtmf, gated, llmfullresponse, llmtext, userresponse, gatedcontext, llmcontextsummarizer)
-│   ├── services/        # Factory; LLM/STT/TTS providers (openai, groq, sarvam, aws, …)
-│   ├── frames/          # Frame types; serialize (JSON, binary protobuf)
+│   ├── services/        # Factory; LLM/STT/TTS providers; RealtimeService (use realtime.NewFromConfig)
+│   ├── realtime/        # OpenAI Realtime API (RealtimeSession, RealtimeService)
+│   ├── runner/          # SessionStore; daily (room/token); telephony message parsing, serializers
+│   ├── frames/          # Frame types; serialize (JSON, binary protobuf; twilio, telnyx, plivo, exotel, …)
 │   ├── config/          # Config, LoadConfig
-│   ├── audio/            # VAD, turn, resample, wav
-│   ├── observers/        # ObservingProcessor, metrics
-│   └── plugin/           # Plugin interface, Registry
+│   ├── audio/           # VAD, turn, resample, wav
+│   ├── observers/       # ObservingProcessor, metrics, turn tracking, user-bot latency
+│   ├── plugin/          # Plugin interface, Registry
+│   └── extensions/      # voicemail, ivr
 ├── config.json
 └── docs/
-    └── ARCHITECTURE.md   # This file
+    ├── ARCHITECTURE.md       # This file
+    └── SYSTEM_ARCHITECTURE.md
 ```
 
 This document and the Mermaid diagrams can be viewed in any Markdown viewer that supports Mermaid (e.g. GitHub, VS Code with Mermaid extension).

@@ -9,26 +9,33 @@ System-level view of the **voila-go** real-time voice pipeline. For component de
 ```mermaid
 flowchart LR
     subgraph Users["Users"]
-        User["User\n(Voice / WebSocket client)"]
+        User["User\n(Voice / WebSocket / WebRTC / Telephony)"]
     end
 
     subgraph Voila["Voila-Go"]
-        Server["Real-time voice pipeline\nSTT → LLM → TTS\nWebSocket / WebRTC"]
+        Server["Real-time voice pipeline\nSTT → LLM → TTS\nWebSocket / WebRTC / Telephony"]
     end
 
     subgraph External["External Systems"]
-        LLM["LLM Provider\n(OpenAI, Groq, AWS)"]
-        STT["STT Provider\n(OpenAI, Groq, Sarvam)"]
-        TTS["TTS Provider\n(OpenAI, Groq, Sarvam)"]
+        LLM["LLM Provider\n(OpenAI, Groq, AWS, …)"]
+        STT["STT Provider\n(OpenAI, Groq, Sarvam, …)"]
+        TTS["TTS Provider\n(OpenAI, Groq, Sarvam, …)"]
+        Realtime["Realtime API\n(OpenAI Realtime)"]
+        Daily["Daily.co\n(Rooms / PSTN)"]
+        Telco["Telephony\n(Twilio, Telnyx, Plivo, Exotel)"]
     end
 
     User -->|"HTTPS, WSS, WebRTC"| Server
     Server -->|"LLM API"| LLM
     Server -->|"Speech-to-text API"| STT
     Server -->|"Text-to-speech API"| TTS
+    Server -.->|"Optional"| Realtime
+    Server -->|"Room / token"| Daily
+    User -->|"PSTN / SIP"| Telco
+    Telco -->|"WSS"| Server
 ```
 
-**In words:** Users connect to Voila-Go via WebSocket or WebRTC. Voila-Go runs a configurable pipeline (e.g. voice: VAD → STT → LLM → TTS) and talks to external LLM, STT, and TTS providers. Frames (audio, text, transcriptions) flow bidirectionally between client and server.
+**In words:** Users connect to Voila-Go via WebSocket, WebRTC, or telephony (Twilio, Telnyx, Plivo, Exotel). Voila-Go runs a configurable pipeline (e.g. voice: VAD → STT → LLM → TTS) and talks to external LLM, STT, and TTS providers. An optional **Realtime** path (e.g. OpenAI Realtime API) can replace the STT+LLM+TTS chain. Frames (audio, text, transcriptions) flow bidirectionally between client and server. Daily.co provides rooms and optional PSTN dial-in; telephony providers use WebSocket backhaul to the server.
 
 ---
 
@@ -39,6 +46,8 @@ flowchart TB
     subgraph Clients["Clients"]
         WSClient["WebSocket Client"]
         WebRTCClient["WebRTC Client"]
+        TelephonyClient["Telephony (Twilio, Telnyx, Plivo, Exotel)"]
+        DailyClient["Daily.co Room Client"]
     end
 
     subgraph VoilaGo["Voila-Go Server"]
@@ -47,14 +56,25 @@ flowchart TB
             Config["Config"]
         end
 
-        subgraph L2["Layer 2: Server"]
+        subgraph L2["Layer 2: Server & Runner"]
             HTTP["HTTP Server"]
             WS["/ws WebSocket"]
             WebRTC["/webrtc/offer"]
+            Start["POST /start"]
+            Sessions["POST|PATCH /sessions/{id}/api/offer"]
+            Telephony["POST / (XML) + /telephony/ws"]
+            Daily["GET / (redirect) + /daily-dialin-webhook"]
+        end
+
+        subgraph L2b["Session Store"]
+            SessionStore["runner.SessionStore\n(sessionId → Session)"]
         end
 
         subgraph L3["Layer 3: Transport"]
             Transport["Transport\nInput ←chan Frame\nOutput chan← Frame"]
+            WSTrans["WebSocket\n(JSON / Protobuf)"]
+            WebRTCTrans["SmallWebRTC"]
+            TelephonyTrans["WebSocket + provider serializer\n(Twilio, Telnyx, …)"]
         end
 
         subgraph L4["Layer 4: Orchestration"]
@@ -71,8 +91,14 @@ flowchart TB
         end
 
         subgraph L6["Layer 6: Services & Data"]
-            Services["Services\nLLM / STT / TTS providers"]
+            Services["Services\nLLM / STT / TTS"]
+            RealtimeSvc["RealtimeService\n(OpenAI Realtime)"]
             Frames["Frames & Serialization"]
+        end
+
+        subgraph Support["Support"]
+            Observers["Observers\n(metrics, turn, latency)"]
+            Extensions["Extensions\n(voicemail, ivr)"]
         end
     end
 
@@ -80,21 +106,40 @@ flowchart TB
         LLMProv["LLM APIs"]
         STTProv["STT APIs"]
         TTSProv["TTS APIs"]
+        DailyAPI["Daily.co API"]
     end
 
     WSClient --> WS
     WebRTCClient --> WebRTC
-    WS --> Transport
-    WebRTC --> Transport
+    TelephonyClient --> Telephony
+    DailyClient --> Start
+    DailyClient --> Sessions
+    WS --> WSTrans
+    WebRTC --> WebRTCTrans
+    Telephony --> TelephonyTrans
+    Start --> SessionStore
+    Sessions --> SessionStore
+    Sessions --> WebRTCTrans
+    WSTrans --> Transport
+    WebRTCTrans --> Transport
+    TelephonyTrans --> Transport
     CLI --> Config
     CLI --> HTTP
     HTTP --> WS
     HTTP --> WebRTC
+    HTTP --> Start
+    HTTP --> Sessions
+    HTTP --> Telephony
+    HTTP --> Daily
     Transport --> Runner
     Runner --> Pipeline
     Pipeline --> Turn --> STT --> LLM --> TTS --> Sink
     Sink --> Runner
     Runner --> Transport
+    Turn --> Observers
+    STT --> Observers
+    LLM --> Observers
+    TTS --> Observers
     Turn --> Frames
     STT --> Services
     LLM --> Services
@@ -102,21 +147,37 @@ flowchart TB
     Services --> LLMProv
     Services --> STTProv
     Services --> TTSProv
+    RealtimeSvc -.->|"Alternative path"| LLMProv
     Pipeline --> Frames
+    Daily --> DailyAPI
 ```
 
 | Layer | Responsibility |
 |-------|----------------|
 | **1 Entry** | Load config, register processors, start server; on new transport → build pipeline + runner |
-| **2 Server** | HTTP server; WebSocket and SmallWebRTC endpoints; `onTransport` callback |
-| **3 Transport** | Bidirectional frame streams (Input/Output), Start/Close; WebSocket & WebRTC impls |
+| **2 Server & Runner** | HTTP server; WebSocket `/ws`; SmallWebRTC `/webrtc/offer`; Pipecat-style `/start`, `/sessions/{id}/api/offer`; telephony POST `/` (XML) + `/telephony/ws`; Daily GET `/` (redirect) and `/daily-dialin-webhook`. Session store for runner sessions. |
+| **3 Transport** | Bidirectional frame streams (Input/Output), Start/Close; WebSocket, SmallWebRTC, telephony WebSocket (provider-specific serializers), memory (tests). |
 | **4 Orchestration** | Runner wires Transport ↔ Pipeline; forwards input → Push, pipeline output → transport |
 | **5 Pipeline** | Linear processor chain (Turn → STT → LLM → TTS → Sink or plugins → Sink) |
-| **6 Services & Data** | LLM/STT/TTS providers; Frame types and JSON/protobuf serialization |
+| **6 Services & Data** | LLM/STT/TTS providers; optional RealtimeService (OpenAI Realtime); Frame types and JSON/protobuf serialization |
+| **Support** | Observers (metrics, turn tracking, user–bot latency); extensions (voicemail, ivr) |
 
 ---
 
-## 3. Runtime: One Connection
+## 3. Entry Points and Runner Modes
+
+| Mode | Config | Entry points | Transport source |
+|------|--------|--------------|------------------|
+| **WebSocket only** | `transport=websocket` (or `""`) | `GET /ws` | `pkg/transport/websocket` |
+| **WebRTC only** | `transport=smallwebrtc` | `POST /webrtc/offer` | `pkg/transport/smallwebrtc` |
+| **Both** | `transport=both` | `/ws`, `POST /webrtc/offer` | Same as above |
+| **Runner (Pipecat-style)** | `transport=both` or WebRTC, or `runner_transport=daily` | `POST /start`, `POST|PATCH /sessions/{id}/api/offer` | SessionStore + SmallWebRTC |
+| **Daily** | `runner_transport=daily` | `GET /` → redirect to room; optional `POST /daily-dialin-webhook` | Daily.co API + room client → /sessions |
+| **Telephony** | `runner_transport=twilio|telnyx|plivo|exotel` | `POST /` (XML webhook), `GET /telephony/ws` | WebSocket with provider serializer |
+
+---
+
+## 4. Runtime: One Connection
 
 ```mermaid
 sequenceDiagram
@@ -128,7 +189,7 @@ sequenceDiagram
     participant Pipeline
     participant Processors
 
-    Client->>Server: Connect (WS or WebRTC)
+    Client->>Server: Connect (WS / WebRTC / Telephony WS)
     Server->>Transport: New transport
     Server->>Runner: Run(transport) [goroutine]
     Runner->>Pipeline: Setup(ctx), Push(StartFrame)
@@ -149,12 +210,12 @@ sequenceDiagram
 
 ---
 
-## 4. Deployment View
+## 5. Deployment View
 
 ```mermaid
 flowchart LR
     subgraph User["User"]
-        Browser["Browser / App"]
+        Browser["Browser / App / Phone"]
     end
 
     subgraph Host["Single host (e.g. VM / container)"]
@@ -166,32 +227,40 @@ flowchart LR
 
     subgraph Cloud["External APIs"]
         APIs["LLM / STT / TTS"]
+        Daily["Daily.co"]
+        Telco["Twilio / Telnyx / …"]
     end
 
     Browser -->|"WSS / WebRTC"| Process
     Main --> Workers
     Workers --> APIs
+    Process --> Daily
+    User -->|"PSTN"| Telco
+    Telco -->|"WSS"| Process
 ```
 
 - **Single process:** One `voila-go` process; one goroutine per active connection (Runner).
-- **No built-in clustering:** Horizontal scaling = multiple instances behind a load balancer; no shared state between instances.
-- **Config:** `config.json` (and env) drives providers and pipeline shape.
+- **No built-in clustering:** Horizontal scaling = multiple instances behind a load balancer; no shared state between instances. SessionStore is in-memory per process.
+- **Config:** `config.json` (and env) drives providers, pipeline shape, `transport`, and `runner_transport`.
 
 ---
 
-## 5. Key Design Decisions
+## 6. Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| **Transport interface** | Same pipeline runs over WebSocket or WebRTC; easy to add more transports. |
+| **Transport interface** | Same pipeline runs over WebSocket or WebRTC or telephony WebSocket; easy to add more transports. |
 | **Linear processor chain** | Simple Push(frame) flow; each processor does one job (Turn, STT, LLM, TTS, Sink). |
 | **Runner per connection** | Isolates sessions; one connection failure does not block others. |
-| **Frames + serialization** | Unified Frame type (audio, text, transcription, etc.); JSON or binary protobuf for pipecat compatibility. |
-| **Config-driven pipeline** | Voice pipeline (provider + model) or plugin chain (echo, logger, etc.) from config. |
+| **Frames + serialization** | Unified Frame type (audio, text, transcription, …); JSON or binary protobuf for pipecat compatibility; provider-specific serializers for telephony. |
+| **Config-driven pipeline** | Voice pipeline (provider + model) or plugin chain (echo, logger, aggregator, …) from config. |
+| **Session store** | In-memory store for Pipecat-style /start and /sessions; sessionId → Session (body, ICE options). |
+| **Realtime service** | Optional RealtimeService (e.g. OpenAI Realtime API) for single-WebSocket voice; lives alongside LLM/STT/TTS in services. |
+| **Observers** | Metrics, turn tracking, and user–bot latency wrapped around processors for observability. |
 
 ---
 
-## 6. References
+## 7. References
 
 - **Full architecture:** [ARCHITECTURE.md](./ARCHITECTURE.md) — components, Mermaid diagrams, data flow, file layout.
 - **Extensions:** [EXTENSIONS.md](./EXTENSIONS.md) — adding processors and transports.
