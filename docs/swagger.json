@@ -1,0 +1,97 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Voxray voice pipeline server: WebSocket and WebRTC transport endpoints.",
+        "title": "Voxray API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/webrtc/offer": {
+            "post": {
+                "description": "Accepts a WebRTC SDP offer and returns an SDP answer. Available when transport is smallwebrtc or both.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webrtc"
+                ],
+                "summary": "Submit WebRTC offer",
+                "parameters": [
+                    {
+                        "description": "SDP offer string",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/pkg_server.webrtcOfferRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/pkg_server.webrtcOfferResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid offer payload",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to start transport",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable (e.g. Opus encoder unavailable)",
+                        "schema": {
+                            "$ref": "#/definitions/pkg_server.webrtcErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "pkg_server.webrtcErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "pkg_server.webrtcOfferRequest": {
+            "type": "object",
+            "properties": {
+                "offer": {
+                    "type": "string"
+                }
+            }
+        },
+        "pkg_server.webrtcOfferResponse": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}

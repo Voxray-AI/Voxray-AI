@@ -1,0 +1,72 @@
+{
+  "_comment": "Copy to config.json and set API keys (or use env vars). Unknown keys like _comment are ignored.",
+  "_comment_turn_vad": "Use turn_detection silence for full utterance to LLM. If VAD misses speech (e.g. second utterance or quiet mic), lower vad_min_volume (e.g. 0.2) or vad_threshold.",
+  "host": "localhost",
+  "port": 3042,
+  "model": "llama-3.1-8b-instant",
+  "provider": "groq",
+  "stt_provider": "sarvam",
+  "llm_provider": "groq",
+  "tts_provider": "sarvam",
+  "stt_model": "saarika:v2.5",
+  "stt_language": "hi-IN",
+  "tts_model": "bulbul:v2",
+  "tts_voice": "anushka",
+  "transport": "both",
+  "webrtc_ice_servers": [
+    "stun:stun.l.google.com:19302",
+    "stun:openrelay.metered.ca:80"
+  ],
+  "plugins": ["echo"],
+  "plugin_options": {
+    "frame_filter": {
+      "allowed_types": ["TextFrame", "TranscriptionFrame"]
+    },
+    "wake_check_filter": {
+      "wake_phrases": ["hey bot"],
+      "keepalive_secs": 5
+    },
+    "stt_mute_filter": {
+      "strategies": ["first_speech", "always"]
+    },
+    "external_chain": {
+      "url": "http://localhost:8765/chain",
+      "stream": true,
+      "timeout_sec": 45,
+      "transcript_key": "input"
+    },
+    "rtvi": {
+      "protocol_version": "1.2.0"
+    }
+  },
+  "allow_interruptions": true,
+  "interruption_strategy": "keyword",
+  "min_words": 3,
+  "turn_detection": "silence",
+  "turn_stop_secs":3.0,
+  "turn_pre_speech_ms": 10,
+  "turn_max_duration_secs": 2,
+  "vad_start_secs": 0,
+  "user_turn_stop_timeout_secs": 4,
+  "user_idle_timeout_secs": 30,
+  "turn_async": false,
+  "vad_threshold": 0.01,
+  "vad_type": "energy",
+  "vad_confidence": 0.2,
+  "vad_start_secs_vad": 0.25,
+  "vad_stop_secs": 0.16,
+  "vad_min_volume": 0.25,
+  "api_keys": {
+    "openai": "",
+    "deepgram": "",
+    "cartesia": "",
+    "daily_room_url": "",
+    "aws": "",
+    "google_cloud_project": "",
+    "google_cloud_location": "",
+    "aws_region": ""
+  },
+  "cors_allowed_origins": [],
+  "max_request_body_bytes": 524288,
+  "server_api_key": ""
+}

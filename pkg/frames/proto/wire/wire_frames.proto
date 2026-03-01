@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+option go_package = "voxray-go/pkg/frames/proto/wire";
+
+// FrameEnvelope wraps a frame with type discriminator and payload (JSON or binary).
+message FrameEnvelope {
+  string type = 1;
+  bytes payload = 2;
+}
+
+// Binary frame messages for wire interoperability (Frame oneof: text, audio, transcription, message).
+// The Frame message and inner messages (TextFrame, AudioRawFrame, TranscriptionFrame, MessageFrame) are
+// aligned with common frame proto for wire compatibility.
+
+message TextFrame {
+  uint64 id = 1;
+  string name = 2;
+  string text = 3;
+}
+
+message AudioRawFrame {
+  uint64 id = 1;
+  string name = 2;
+  bytes audio = 3;
+  uint32 sample_rate = 4;
+  uint32 num_channels = 5;
+  optional uint64 pts = 6;
+}
+
+message TranscriptionFrame {
+  uint64 id = 1;
+  string name = 2;
+  string text = 3;
+  string user_id = 4;
+  string timestamp = 5;
+}
+
+message MessageFrame {
+  string data = 1;  // JSON-encoded transport message
+}
+
+message Frame {
+  oneof frame {
+    TextFrame text = 1;
+    AudioRawFrame audio = 2;
+    TranscriptionFrame transcription = 3;
+    MessageFrame message = 4;
+  }
+}

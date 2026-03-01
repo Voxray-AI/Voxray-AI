@@ -1,0 +1,64 @@
+basePath: /
+definitions:
+  pkg_server.webrtcErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  pkg_server.webrtcOfferRequest:
+    properties:
+      offer:
+        type: string
+    type: object
+  pkg_server.webrtcOfferResponse:
+    properties:
+      answer:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: 'Voxray voice pipeline server: WebSocket and WebRTC transport endpoints.'
+  title: Voxray API
+  version: "1.0"
+paths:
+  /webrtc/offer:
+    post:
+      consumes:
+      - application/json
+      description: Accepts a WebRTC SDP offer and returns an SDP answer. Available
+        when transport is smallwebrtc or both.
+      parameters:
+      - description: SDP offer string
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/pkg_server.webrtcOfferRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/pkg_server.webrtcOfferResponse'
+        "400":
+          description: Invalid offer payload
+          schema:
+            type: string
+        "405":
+          description: Method not allowed
+          schema:
+            type: string
+        "500":
+          description: Failed to start transport
+          schema:
+            type: string
+        "503":
+          description: Service unavailable (e.g. Opus encoder unavailable)
+          schema:
+            $ref: '#/definitions/pkg_server.webrtcErrorResponse'
+      summary: Submit WebRTC offer
+      tags:
+      - webrtc
+swagger: "2.0"

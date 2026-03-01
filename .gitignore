@@ -1,0 +1,42 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+voxray
+*.log
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+coverage.txt
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDEs and editors
+.vscode/
+.idea/
+*.iml
+.cursor/
+*.swp
+*~
+.project
+.settings/
+.classpath
+*.wav
+
+# Config with secrets (use config.example.json as template, set api_keys via env)
+# Config with secrets (use config.example.json as template, set api_keys via env)
+/config.json
+config_.json
+*.local.json
+.env
+.env.local

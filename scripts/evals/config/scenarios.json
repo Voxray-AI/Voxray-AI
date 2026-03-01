@@ -1,0 +1,17 @@
+{
+  "scenarios": [
+    {
+      "name": "math_2_plus_2",
+      "prompt": "What is 2 plus 2? Reply with just the number.",
+      "expected_contains": "4",
+      "timeout_secs": 30,
+      "system_prompt": "You are a helpful assistant. Reply briefly with only the answer."
+    },
+    {
+      "name": "greeting",
+      "prompt": "Say hello in one short sentence.",
+      "expected_pattern": "hello|hi|hey",
+      "timeout_secs": 20
+    }
+  ]
+}

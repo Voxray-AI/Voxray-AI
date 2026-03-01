@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voxray WebRTC Voice Client</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; max-width: 980px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+      button { padding: 10px 14px; border-radius: 10px; border: 1px solid #6666; cursor: pointer; }
+      input { padding: 10px 12px; border-radius: 10px; border: 1px solid #6666; min-width: 320px; }
+      .card { border: 1px solid #6663; border-radius: 14px; padding: 14px; margin-top: 14px; }
+      .muted { opacity: 0.75; }
+      pre { white-space: pre-wrap; word-break: break-word; }
+      .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; border: 1px solid #6666; font-size: 12px; }
+      audio { margin-top: 0.5rem; display: block; }
+    </style>
+  </head>
+  <body>
+    <h2>WebRTC Voice Client</h2>
+    <div class="row">
+      <label class="muted" for="baseUrl">Backend URL</label>
+      <input id="baseUrl" value="" placeholder="(leave blank for same origin)" aria-label="Backend URL (leave blank for same origin)" />
+      <button id="connectBtn" aria-label="Connect to voice backend">Connect</button>
+      <button id="disconnectBtn" disabled aria-label="Disconnect from voice backend">Disconnect</button>
+      <span id="status" class="pill" aria-live="polite">idle</span>
+    </div>
+
+    <div class="card">
+      <p class="muted">Pipeline: mic → STT → LLM → TTS → speaker. Mic sent as audio track; TTS received on remote track.</p>
+      <div class="row" style="margin-top: 10px">
+        <span class="muted">Log</span>
+      </div>
+      <pre id="log" class="muted"></pre>
+    </div>
+
+    <audio id="remoteAudio" autoplay playsinline></audio>
+
+    <script>
+      const el = (id) => document.getElementById(id);
+      const logEl = el("log");
+      const statusEl = el("status");
+      const connectBtn = el("connectBtn");
+      const disconnectBtn = el("disconnectBtn");
+      const baseUrlInput = el("baseUrl");
+      const remoteAudio = el("remoteAudio");
+
+      function setStatus(s) { statusEl.textContent = s; }
+      function logTime() {
+        const d = new Date();
+        return d.toTimeString().slice(0, 12) + "." + String(d.getMilliseconds()).padStart(3, "0");
+      }
+      function log(...args) {
+        const line = "[" + logTime() + "] " + args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+        logEl.textContent = (logEl.textContent + line + "\n").slice(-12000);
+      }
+
+      let pc = null;
+      let localStream = null;
+
+      async function connect() {
+        const baseUrl = baseUrlInput.value.trim().replace(/\/$/, "");
+        const offerUrl = (baseUrl ? baseUrl : "") + "/webrtc/offer";
+        log("Connecting to", offerUrl || "(same origin)/webrtc/offer");
+        setStatus("connecting");
+
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+          setStatus("idle");
+          log("Microphone API not available. Use HTTPS or localhost.");
+          return;
+        }
+
+        setStatus("Requesting microphone…");
+        log("Requesting microphone permission…");
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+          setStatus("idle");
+          const errName = (e && e.name) || "Unknown";
+          const errMsg = (e && e.message) || String(e);
+          log("getUserMedia error:", errName, errMsg);
+          if (errName === "NotAllowedError" || errName === "PermissionDeniedError") {
+            log("Allow microphone in the browser prompt, or check site permissions.");
+          }
+          return;
+        }
+        log("Microphone ready, tracks:", localStream.getTracks().length);
+
+        const isLocal = !baseUrl || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(baseUrl);
+        const iceServers = isLocal ? [] : [{ urls: ["stun:stun.l.google.com:19302"] }];
+
+        pc = new RTCPeerConnection({ iceServers });
+
+        pc.onconnectionstatechange = () => {
+          setStatus(pc.connectionState);
+          log("pc state:", pc.connectionState);
+        };
+        pc.oniceconnectionstatechange = () => {
+          if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+          }
+        };
+
+        pc.ontrack = (ev) => {
+          log("Received remote track:", ev.track?.kind, "id=", ev.track?.id);
+          if (ev.streams && ev.streams[0]) {
+            remoteAudio.srcObject = ev.streams[0];
+            setStatus("connected");
+            log("Playing remote audio (TTS).");
+          } else {
+            log("Remote track has no stream.");
+          }
+        };
+
+        localStream.getTracks().forEach((track) => {
+          pc.addTrack(track, localStream);
+        });
+        log("Added", localStream.getTracks().length, "track(s) to peer connection.");
+
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+        } catch (e) {
+          setStatus("idle");
+          log("Create offer failed:", e.message || e.name);
+          cleanup();
+          return;
+        }
+
+        if (pc.iceGatheringState !== "complete") {
+          const gatheringDone = new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+              if (done) return;
+              done = true;
+              pc.removeEventListener("icegatheringstatechange", onComplete);
+              resolve();
+            };
+            const onComplete = () => { if (pc.iceGatheringState === "complete") finish(); };
+            pc.addEventListener("icegatheringstatechange", onComplete);
+            if (pc.iceGatheringState === "complete") finish();
+            else setTimeout(() => { if (pc.iceGatheringState === "complete") finish(); }, 0);
+          });
+          const timeout = (ms) => new Promise((r) => setTimeout(r, ms));
+          await Promise.race([gatheringDone, timeout(5000)]);
+        }
+        log("Offer created (ICE gathered), sending to server…");
+
+        const resp = await fetch(offerUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offer: JSON.stringify(pc.localDescription) }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          log("Offer failed:", resp.status, text);
+          cleanup();
+          throw new Error("Offer failed: " + resp.status + " " + text);
+        }
+        const data = await resp.json();
+        if (!data.answer) {
+          log("No answer in response.");
+          cleanup();
+          throw new Error("No answer in response");
+        }
+        const answer = typeof data.answer === "string" ? JSON.parse(data.answer) : data.answer;
+        log("Answer received, setting remote description…");
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+        connectBtn.disabled = true;
+        disconnectBtn.disabled = false;
+        setStatus(pc.connectionState || "connecting");
+        log("Signaling complete. Waiting for ICE and remote track.");
+      }
+
+      function cleanup() {
+        if (pc) {
+          pc.close();
+          pc = null;
+        }
+        if (localStream) {
+          localStream.getTracks().forEach((t) => t.stop());
+          localStream = null;
+        }
+        remoteAudio.srcObject = null;
+        connectBtn.disabled = false;
+        disconnectBtn.disabled = true;
+        setStatus("idle");
+      }
+
+      function disconnect() {
+        log("Disconnecting…");
+        cleanup();
+        log("Disconnected.");
+      }
+
+      connectBtn.onclick = async () => {
+        connectBtn.disabled = true;
+        try {
+          setStatus("connecting");
+          await connect();
+        } catch (e) {
+          log("Connect error:", String(e));
+          cleanup();
+        }
+      };
+      disconnectBtn.onclick = () => disconnect();
+    </script>
+  </body>
+</html>
