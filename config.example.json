@@ -13,6 +13,11 @@
   "tts_model": "bulbul:v2",
   "tts_voice": "anushka",
   "plugins": ["echo"],
+  "plugin_options": {
+    "frame_filter": { "allowed_types": ["TextFrame", "TranscriptionFrame"] },
+    "wake_check_filter": { "wake_phrases": ["hey bot"], "keepalive_secs": 3 },
+    "stt_mute_filter": { "strategies": ["first_speech", "always"] }
+  },
   "allow_interruptions": true,
   "turn_detection": "none",
   "turn_stop_secs": 3,

@@ -2,6 +2,7 @@
 package pipeline
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -9,8 +10,8 @@ import (
 	"voila-go/pkg/processors"
 )
 
-// ProcessorConstructor builds a processor from a name (e.g. from config).
-type ProcessorConstructor func(name string) processors.Processor
+// ProcessorConstructor builds a processor from a name and optional JSON options (nil = use defaults).
+type ProcessorConstructor func(name string, opts json.RawMessage) processors.Processor
 
 var (
 	registry   = make(map[string]ProcessorConstructor)
@@ -18,6 +19,7 @@ var (
 )
 
 // RegisterProcessor registers a processor constructor by name. Used for dynamic loading from config.
+// The constructor receives opts from cfg.PluginOptions[name]; opts may be nil.
 func RegisterProcessor(name string, ctor ProcessorConstructor) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -25,7 +27,7 @@ func RegisterProcessor(name string, ctor ProcessorConstructor) {
 }
 
 // ProcessorsFromConfig returns a slice of processors for the plugin names in cfg.Plugins.
-// Unknown names are skipped (or return error if strict). Built-ins (echo, logger, aggregator) must be registered by the application.
+// Unknown names return an error. Each constructor receives opts from cfg.PluginOptions[name] (may be nil).
 func ProcessorsFromConfig(cfg *config.Config) ([]processors.Processor, error) {
 	if cfg == nil {
 		return nil, nil
@@ -38,7 +40,11 @@ func ProcessorsFromConfig(cfg *config.Config) ([]processors.Processor, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown processor/plugin: %q", name)
 		}
-		out = append(out, ctor(name))
+		var opts json.RawMessage
+		if cfg.PluginOptions != nil {
+			opts = cfg.PluginOptions[name]
+		}
+		out = append(out, ctor(name, opts))
 	}
 	return out, nil
 }
