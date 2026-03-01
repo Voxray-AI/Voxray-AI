@@ -1,4 +1,4 @@
-// Package runner provides Pipecat-style telephony WebSocket parsing and serializer construction.
+// Package runner provides runner telephony WebSocket parsing and serializer construction.
 package runner
 
 import (

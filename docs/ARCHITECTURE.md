@@ -181,22 +181,22 @@ sequenceDiagram
 | Layer | Package(s) | Responsibility |
 |-------|------------|----------------|
 | **Entry** | `cmd/voila` | Load config, register processors, start server, build pipeline per transport |
-| **Server** | `pkg/server` | HTTP server; WebSocket `/ws` and/or SmallWebRTC `/webrtc/offer`; Pipecat-style `/start`, `/sessions/{id}/api/offer`; telephony POST `/` + `/telephony/ws`; Daily GET `/`, `/daily-dialin-webhook`; `onTransport` callback; `pkg/runner` SessionStore for runner sessions |
+| **Server** | `pkg/server` | HTTP server; WebSocket `/ws` and/or SmallWebRTC `/webrtc/offer`; runner-style `/start`, `/sessions/{id}/api/offer`; telephony POST `/` + `/telephony/ws`; Daily GET `/`, `/daily-dialin-webhook`; `onTransport` callback; `pkg/runner` SessionStore for runner sessions |
 | **Transport** | `pkg/transport`, `transport/websocket`, `transport/smallwebrtc`, `transport/memory`, `transport/whatsapp`; telephony via websocket + provider serializers | Bidirectional frame channels (Input/Output), Start/Close |
 | **Runner** | `pkg/pipeline` (Runner) | Connect transport to pipeline; forward input → Push; pipeline output → transport |
 | **Pipeline** | `pkg/pipeline` (Pipeline) | Linear processor chain; Setup/Cleanup; Push(StartFrame), Push(frames) |
-| **Processors** | `pkg/processors`, `processors/voice`, `processors/echo`, `processors/aggregators/*` | Turn (VAD), STT, LLM, TTS, Sink; echo/logger/aggregator; pipecat aggregators (dtmf_aggregator, gated, llmfullresponse, llmtext, userresponse, gated_llm_context, llmcontextsummarizer) |
+| **Processors** | `pkg/processors`, `processors/voice`, `processors/echo`, `processors/aggregators/*` | Turn (VAD), STT, LLM, TTS, Sink; echo/logger/aggregator; aggregators (dtmf_aggregator, gated, llmfullresponse, llmtext, userresponse, gated_llm_context, llmcontextsummarizer) |
 | **Services** | `pkg/services`, `services/*` | LLM, STT, TTS provider implementations (OpenAI, Groq, Sarvam, AWS, …) |
 | **Frames** | `pkg/frames`, `frames/serialize` | Frame types (Start, Cancel, Audio, Text, Transcription, …); JSON / binary protobuf |
 | **Support** | `pkg/config`, `pkg/audio`, `pkg/observers`, `pkg/plugin` | Config, VAD/turn/resample, metrics, plugin registry |
 
 ---
 
-### 4.1 Wire format and Pipecat compatibility
+### 4.1 Wire format compatibility
 
-Binary **Frame** wire format (Text, Audio, Transcription, Message) matches [pipecat-ai/pipecat](https://github.com/pipecat-ai/pipecat) `src/pipecat/frames/frames.proto`: same message names, field numbers, and types. Use `ProtobufSerializer` on WebSocket binary messages for interoperability with Python pipecat clients or servers.
+Binary **Frame** wire format (Text, Audio, Transcription, Message) follows a common frame proto: same message names, field numbers, and types. Use `ProtobufSerializer` on WebSocket binary messages for interoperability with external clients or servers.
 
-**Voila-go–specific:** JSON envelope (type + data) and system frames (StartFrame, CancelFrame, ErrorFrame) are not in pipecat’s proto; they are used for JSON transport or skipped when using binary protobuf.
+**Voila-go–specific:** JSON envelope (type + data) and system frames (StartFrame, CancelFrame, ErrorFrame) are not in the shared proto; they are used for JSON transport or skipped when using binary protobuf.
 
 ---
 
@@ -212,7 +212,7 @@ When `config` has `provider` and `model`, the server builds a **voice pipeline**
 
 Otherwise, the pipeline is built from **config.Plugins** (e.g. echo, logger, aggregator) and ends with Sink.
 
-**Pipecat-style aggregators** (in `pkg/processors/aggregators/`) can be registered and used in plugin pipelines or composed with the voice pipeline:
+**Aggregators** (in `pkg/processors/aggregators/`) can be registered and used in plugin pipelines or composed with the voice pipeline:
 
 - **dtmf_aggregator**: Accumulates `InputDTMFFrame` digits; flushes as `TranscriptionFrame` on timeout, `#`, or End/Cancel. Place before LLM when using DTMF input (e.g. telephony IVR).
 - **gated**: Buffers frames when a custom gate is closed; releases when gate opens. Use for flow control.
@@ -222,7 +222,7 @@ Otherwise, the pipeline is built from **config.Plugins** (e.g. echo, logger, agg
 - **gated_llm_context**: Holds `LLMContextFrame` until a notifier signals release.
 - **llmcontextsummarizer**: Monitors context size; pushes `LLMContextSummaryRequestFrame` when thresholds are exceeded; applies `LLMContextSummaryResultFrame` to compress history.
 
-**Frameworks** (`pkg/processors/frameworks/`) integrate external runtimes and the RTVI protocol (ported from [Pipecat processors/frameworks](https://github.com/pipecat-ai/pipecat/tree/main/src/pipecat/processors/frameworks)):
+**Frameworks** (`pkg/processors/frameworks/`) integrate external runtimes and the RTVI protocol (ported from upstream frameworks):
 
 - **external_chain**: Calls an HTTP endpoint (e.g. Langchain or Strands sidecar) with the last user message from `LLMContextFrame` and streams the response as `LLMTextFrame`. Configure via `plugin_options["external_chain"]` with `url`, `stream`, `timeout_sec`, `transcript_key`.
 - **rtvi**: RTVI (Real-Time Voice Interface) protocol processor. Handles client-ready, send-text (injects `TranscriptionFrame`), and pushes bot-ready/error as RTVI server messages. Use WebSocket with `?rtvi=1` and include `rtvi` in plugins; see [FRAMEWORKS.md](./FRAMEWORKS.md).
@@ -232,7 +232,7 @@ Otherwise, the pipeline is built from **config.Plugins** (e.g. echo, logger, agg
 ### 5.1 Runner modes and entry points
 
 - **WebSocket / WebRTC:** `transport` = `websocket`, `smallwebrtc`, or `both`. Clients use `/ws` or `POST /webrtc/offer`.
-- **Runner (Pipecat-style):** When WebRTC or Daily is enabled, `POST /start` creates a session (optionally with `createDailyRoom`); clients then send `POST` or `PATCH` to `/sessions/{sessionId}/api/offer` with SDP. SessionStore holds session body and ICE options per sessionId.
+- **Runner:** When WebRTC or Daily is enabled, `POST /start` creates a session (optionally with `createDailyRoom`); clients then send `POST` or `PATCH` to `/sessions/{sessionId}/api/offer` with SDP. SessionStore holds session body and ICE options per sessionId.
 - **Telephony:** `runner_transport` = `twilio`, `telnyx`, `plivo`, or `exotel`. Provider calls `POST /` (XML webhook); media flows over `/telephony/ws` (WebSocket with provider-specific frame serialization).
 - **Daily:** `runner_transport=daily`. `GET /` creates a room and redirects to it; optional `POST /daily-dialin-webhook` for PSTN dial-in. Room clients use the same pipeline via WebRTC.
 

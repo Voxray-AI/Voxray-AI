@@ -25,3 +25,10 @@ func TestLogger_NewDefaultName(t *testing.T) {
 	}
 }
 
+func TestLogger_New(t *testing.T) {
+	p := logger.New("log")
+	if p == nil || p.Name() != "log" {
+		t.Errorf("New: got %v", p)
+	}
+}
+

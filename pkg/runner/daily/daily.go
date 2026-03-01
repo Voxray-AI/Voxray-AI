@@ -1,5 +1,5 @@
 // Package daily provides Daily.co room and meeting token creation via the REST API
-// (aligned with Python pipecat/runner/daily.py).
+// (runner Daily integration).
 package daily
 
 import (
@@ -62,9 +62,9 @@ func Configure(ctx context.Context, opts Options) (*Config, error) {
 	expiry := time.Now().Add(time.Duration(roomExpHrs * float64(time.Hour))).Unix()
 	tokenExpiry := time.Now().Add(time.Duration(tokenExpHrs * float64(time.Hour))).Unix()
 
-	roomName := "pipecat-" + uuid.New().String()[:8]
+	roomName := "voila-" + uuid.New().String()[:8]
 	if opts.SIPCallerPhone != "" {
-		roomName = "pipecat-sip-" + uuid.New().String()[:8]
+		roomName = "voila-sip-" + uuid.New().String()[:8]
 	}
 
 	// Build room properties
@@ -122,7 +122,7 @@ func Configure(ctx context.Context, opts Options) (*Config, error) {
 			"room_name": roomName,
 			"exp":       tokenExpiry,
 			"is_owner":  true,
-			"user_name": "Pipecat Bot",
+			"user_name": "Voila Bot",
 		},
 	}
 	tokenJSON, _ := json.Marshal(tokenBody)

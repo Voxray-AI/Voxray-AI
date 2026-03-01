@@ -1,11 +1,11 @@
-// Package runner provides Pipecat-style runner types and session management.
+// Package runner provides runner types and session management.
 package runner
 
 import (
 	"sync"
 )
 
-// Session holds data for a Pipecat-style session (created by POST /start).
+// Session holds data for a runner session (created by POST /start).
 type Session struct {
 	// Body is the optional request body from /start.
 	Body map[string]interface{}

@@ -83,6 +83,21 @@ func bodyReader(r *http.Request, w http.ResponseWriter, maxBytes int64) io.Reade
 	return http.MaxBytesReader(w, r.Body, maxBytes)
 }
 
+// getWebSocketSerializer returns the serializer for /ws based on query params: rtvi=1 → RTVI, format=protobuf → binary protobuf (wire-compatible), else nil (JSON).
+func getWebSocketSerializer(r *http.Request) serialize.Serializer {
+	if r == nil || r.URL == nil {
+		return nil
+	}
+	q := r.URL.Query()
+	if q.Get("rtvi") != "" {
+		return &rtvi.Serializer{}
+	}
+	if strings.EqualFold(strings.TrimSpace(q.Get("format")), "protobuf") {
+		return serialize.ProtobufSerializer{}
+	}
+	return nil
+}
+
 // requireAPIKey returns true if no ServerAPIKey is set or the request presents a valid key via Authorization: Bearer <key> or X-API-Key: <key>. Otherwise writes 401 JSON and returns false.
 func requireAPIKey(cfg *config.Config, w http.ResponseWriter, r *http.Request) bool {
 	if cfg == nil || cfg.ServerAPIKey == "" {
@@ -103,7 +118,7 @@ func requireAPIKey(cfg *config.Config, w http.ResponseWriter, r *http.Request) b
 	return true
 }
 
-// registerHandlers registers the web file server (when web/ exists), Swagger, Pipecat-style /start and /sessions when WebRTC is enabled, and the WebRTC /webrtc/offer handler on mux.
+// registerHandlers registers the web file server (when web/ exists), Swagger, runner /start and /sessions when WebRTC is enabled, and the WebRTC /webrtc/offer handler on mux.
 func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore) {
 	// Health (liveness): always 200 when process is up
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -219,10 +234,10 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 			}
 		})
 	}
-	// Telephony routes (Pipecat runner: twilio, telnyx, plivo, exotel)
+	// Telephony routes (runner: twilio, telnyx, plivo, exotel)
 	registerTelephonyRoutes(mux, cfg, ctx, onTransport)
 
-	// Daily routes (Pipecat runner: daily)
+	// Daily routes (runner: daily)
 	registerDailyRoutes(mux, cfg, ctx, onTransport)
 
 	// Web root last so it doesn't override /start or /sessions (skip when telephony or daily uses /)
@@ -416,7 +431,7 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 	}
 }
 
-// registerRunnerWebRTCRoutes adds POST /start and POST/PATCH /sessions/{id}/api/offer (Pipecat Cloud-style).
+// registerRunnerWebRTCRoutes adds POST /start and POST/PATCH /sessions/{id}/api/offer (runner-style).
 func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), store runner.SessionStore) {
 	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
 		setCORS(w, r, cfg.CORSAllowedOrigins, "POST, OPTIONS")
@@ -621,12 +636,7 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 		RegisterHandlers: func(mux *http.ServeMux) {
 			registerHandlers(mux, cfg, ctx, onTransport, sessionStore)
 		},
-		GetSerializer: func(r *http.Request) serialize.Serializer {
-			if r != nil && r.URL != nil && r.URL.Query().Get("rtvi") != "" {
-				return &rtvi.Serializer{}
-			}
-			return nil
-		},
+		GetSerializer: getWebSocketSerializer,
 	}
 	if cfg.ServerAPIKey != "" {
 		server.CheckAuth = func(w http.ResponseWriter, r *http.Request) bool {
@@ -681,12 +691,7 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 		RegisterHandlers: func(mux *http.ServeMux) {
 			registerHandlers(mux, cfg, ctx, onTransport, sessionStore)
 		},
-		GetSerializer: func(r *http.Request) serialize.Serializer {
-			if r != nil && r.URL != nil && r.URL.Query().Get("rtvi") != "" {
-				return &rtvi.Serializer{}
-			}
-			return nil
-		},
+		GetSerializer: getWebSocketSerializer,
 	}
 	if cfg.ServerAPIKey != "" {
 		server.CheckAuth = func(w http.ResponseWriter, r *http.Request) bool {

@@ -10,7 +10,7 @@ message FrameEnvelope {
 
 // Binary frame messages for wire interoperability (Frame oneof: text, audio, transcription, message).
 // The Frame message and inner messages (TextFrame, AudioRawFrame, TranscriptionFrame, MessageFrame) are
-// aligned with pipecat-ai/pipecat src/pipecat/frames/frames.proto for wire compatibility.
+// aligned with common frame proto for wire compatibility.
 
 message TextFrame {
   uint64 id = 1;

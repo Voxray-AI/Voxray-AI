@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// LLMTokenUsage holds token usage for an LLM call (pipecat metrics parity).
+// LLMTokenUsage holds token usage for an LLM call.
 type LLMTokenUsage struct {
 	PromptTokens           int
 	CompletionTokens       int
@@ -16,7 +16,7 @@ type LLMTokenUsage struct {
 	ReasoningTokens        int // optional
 }
 
-// TurnMetrics holds turn detection metrics (pipecat TurnMetricsData parity).
+// TurnMetrics holds turn detection metrics.
 type TurnMetrics struct {
 	IsComplete           bool
 	Probability          float64

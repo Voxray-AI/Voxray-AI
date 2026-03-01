@@ -1,5 +1,5 @@
-// Package runner provides Pipecat-style runner types and session argument types
-// for development runner (aligned with Python pipecat/runner/types.py).
+// Package runner provides runner types and session argument types
+// for development runner.
 package runner
 
 // RunnerArgs holds common session arguments for the runner.
@@ -53,7 +53,7 @@ type LiveKitRunnerArgs struct {
 }
 
 // DialinSettings holds dial-in settings from the Daily webhook (PSTN/SIP).
-// Matches Pipecat Cloud and Daily.co webhook payload structure (camelCase from webhook).
+// Matches runner cloud and Daily.co webhook payload structure (camelCase from webhook).
 type DialinSettings struct {
 	CallID      string            `json:"callId"`
 	CallDomain  string            `json:"callDomain"`

@@ -136,3 +136,10 @@ func TestInputDTMFFrameRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecodeByType_UnknownType(t *testing.T) {
+	_, err := serialize.DecodeByType("UnknownFrameType", []byte("{}"))
+	if err == nil {
+		t.Error("DecodeByType(unknown type) should return error")
+	}
+}
+

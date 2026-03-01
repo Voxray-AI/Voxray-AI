@@ -42,3 +42,20 @@ func TestUserTurnFramesImplementFrame(t *testing.T) {
 	var _ frames.Frame = (&frames.UserIdleFrame{})
 }
 
+func TestNewBase(t *testing.T) {
+	b := frames.NewBase()
+	if b.ID() == 0 {
+		t.Error("NewBase() ID should be non-zero")
+	}
+	if b.Metadata() == nil {
+		t.Error("NewBase() Metadata should be non-nil")
+	}
+}
+
+func TestNewBaseWithID(t *testing.T) {
+	b := frames.NewBaseWithID(42)
+	if b.ID() != 42 {
+		t.Errorf("NewBaseWithID(42) ID = %d, want 42", b.ID())
+	}
+}
+

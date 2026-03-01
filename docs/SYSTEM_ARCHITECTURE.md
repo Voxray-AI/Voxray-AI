@@ -155,7 +155,7 @@ flowchart TB
 | Layer | Responsibility |
 |-------|----------------|
 | **1 Entry** | Load config, register processors, start server; on new transport → build pipeline + runner |
-| **2 Server & Runner** | HTTP server; WebSocket `/ws`; SmallWebRTC `/webrtc/offer`; Pipecat-style `/start`, `/sessions/{id}/api/offer`; telephony POST `/` (XML) + `/telephony/ws`; Daily GET `/` (redirect) and `/daily-dialin-webhook`. Session store for runner sessions. |
+| **2 Server & Runner** | HTTP server; WebSocket `/ws`; SmallWebRTC `/webrtc/offer`; runner-style `/start`, `/sessions/{id}/api/offer`; telephony POST `/` (XML) + `/telephony/ws`; Daily GET `/` (redirect) and `/daily-dialin-webhook`. Session store for runner sessions. |
 | **3 Transport** | Bidirectional frame streams (Input/Output), Start/Close; WebSocket, SmallWebRTC, telephony WebSocket (provider-specific serializers), memory (tests). |
 | **4 Orchestration** | Runner wires Transport ↔ Pipeline; forwards input → Push, pipeline output → transport |
 | **5 Pipeline** | Linear processor chain (Turn → STT → LLM → TTS → Sink or plugins → Sink) |
@@ -171,7 +171,7 @@ flowchart TB
 | **WebSocket only** | `transport=websocket` (or `""`) | `GET /ws` | `pkg/transport/websocket` |
 | **WebRTC only** | `transport=smallwebrtc` | `POST /webrtc/offer` | `pkg/transport/smallwebrtc` |
 | **Both** | `transport=both` | `/ws`, `POST /webrtc/offer` | Same as above |
-| **Runner (Pipecat-style)** | `transport=both` or WebRTC, or `runner_transport=daily` | `POST /start`, `POST|PATCH /sessions/{id}/api/offer` | SessionStore + SmallWebRTC |
+| **Runner** | `transport=both` or WebRTC, or `runner_transport=daily` | `POST /start`, `POST|PATCH /sessions/{id}/api/offer` | SessionStore + SmallWebRTC |
 | **Daily** | `runner_transport=daily` | `GET /` → redirect to room; optional `POST /daily-dialin-webhook` | Daily.co API + room client → /sessions |
 | **Telephony** | `runner_transport=twilio|telnyx|plivo|exotel` | `POST /` (XML webhook), `GET /telephony/ws` | WebSocket with provider serializer |
 
@@ -252,9 +252,9 @@ flowchart LR
 | **Transport interface** | Same pipeline runs over WebSocket or WebRTC or telephony WebSocket; easy to add more transports. |
 | **Linear processor chain** | Simple Push(frame) flow; each processor does one job (Turn, STT, LLM, TTS, Sink). |
 | **Runner per connection** | Isolates sessions; one connection failure does not block others. |
-| **Frames + serialization** | Unified Frame type (audio, text, transcription, …); JSON or binary protobuf for pipecat compatibility; provider-specific serializers for telephony. |
+| **Frames + serialization** | Unified Frame type (audio, text, transcription, …); JSON or binary protobuf for wire compatibility; provider-specific serializers for telephony. |
 | **Config-driven pipeline** | Voice pipeline (provider + model) or plugin chain (echo, logger, aggregator, …) from config. |
-| **Session store** | SessionStore interface: in-memory (default, single instance) or Redis (shared across instances for horizontal scaling). Used by Pipecat-style /start and /sessions; sessionId → Session (body, ICE options). Config: `session_store`, `redis_url`, `session_ttl_secs`. |
+| **Session store** | SessionStore interface: in-memory (default, single instance) or Redis (shared across instances for horizontal scaling). Used by runner /start and /sessions; sessionId → Session (body, ICE options). Config: `session_store`, `redis_url`, `session_ttl_secs`. |
 | **Realtime service** | Optional RealtimeService (e.g. OpenAI Realtime API) for single-WebSocket voice; lives alongside LLM/STT/TTS in services. |
 | **Observers** | Metrics, turn tracking, and user–bot latency wrapped around processors for observability. |
 

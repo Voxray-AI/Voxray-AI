@@ -1,6 +1,6 @@
-# Pipecat Extensions
+# Extensions
 
-This document describes the **IVR** and **Voicemail** extensions integrated from [pipecat-ai/pipecat](https://github.com/pipecat-ai/pipecat) and how to use them in voila-go pipelines.
+This document describes the **IVR** and **Voicemail** extensions and how to use them in voila-go pipelines.
 
 ---
 

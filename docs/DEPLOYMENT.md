@@ -89,5 +89,6 @@ readinessProbe:
 
 ## References
 
+- [CONNECTIVITY.md](./CONNECTIVITY.md) — what can connect (WebSocket, WebRTC, telephony) and wire formats.
 - [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md) — system view and deployment diagram.
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — components and data flow.

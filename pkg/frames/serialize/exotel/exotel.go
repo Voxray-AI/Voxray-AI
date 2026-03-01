@@ -1,4 +1,4 @@
-// Package exotel provides Exotel Media Streams WebSocket protocol serializer for Pipecat.
+// Package exotel provides Exotel Media Streams WebSocket protocol serializer.
 package exotel
 
 import (

@@ -1,7 +1,9 @@
 ### Test layout and conventions
 
 - **Unit tests**
-  - Co-located next to implementation files as `*_test.go` inside `pkg/**` and `cmd/**`.
+  - Live under `tests/pkg/**` as external tests (`package <pkg>_test`, import `voila-go/pkg/...`). Run with `go test ./tests/pkg/...`.
+  - Build/smoke tests for `cmd/`, `examples/`, and `docs` live under `tests/cmd/**`, `tests/examples/**`, and `tests/docs/` and ensure those packages compile (e.g. via `go build`).
+  - A few tests remain in `pkg/**` where they rely on unexported APIs (e.g. `pkg/audio/turn`, `pkg/audio/vad`, `pkg/processors/voice`, `pkg/services/anthropic`, `pkg/services/google`).
   - Use Go's standard `testing` package plus `testify` for assertions and helpers.
 
 - **Integration tests**

@@ -1,4 +1,4 @@
-// Package plivo provides Plivo Audio Streaming WebSocket protocol serializer for Pipecat.
+// Package plivo provides Plivo Audio Streaming WebSocket protocol serializer.
 package plivo
 
 import (

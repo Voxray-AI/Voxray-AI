@@ -1,4 +1,4 @@
-// Package telnyx provides Telnyx WebSocket protocol serializer for Pipecat.
+// Package telnyx provides Telnyx WebSocket protocol serializer.
 package telnyx
 
 import (
