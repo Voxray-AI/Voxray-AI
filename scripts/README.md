@@ -1,6 +1,6 @@
 # Scripts
 
-Index of script groups integrated from [pipecat-ai/pipecat/scripts](https://github.com/pipecat-ai/pipecat/tree/main/scripts), adapted for this Go repo.
+Index of script groups adapted for this Go repo.
 
 | Script / Dir | Description | How to run |
 |--------------|-------------|------------|

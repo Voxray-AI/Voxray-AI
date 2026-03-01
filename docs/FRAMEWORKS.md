@@ -1,6 +1,6 @@
 # Frameworks: External chain and RTVI
 
-This document describes the **frameworks** processors ported from [Pipecat processors/frameworks](https://github.com/pipecat-ai/pipecat/tree/main/src/pipecat/processors/frameworks): external chain (Langchain/Strands-style backends) and the RTVI protocol.
+This document describes the **frameworks** processors ported from upstream frameworks: external chain (Langchain/Strands-style backends) and the RTVI protocol.
 
 ---
 
@@ -45,7 +45,7 @@ Add `external_chain` to `plugins` and set `plugin_options["external_chain"]`:
 
 ## 2. RTVI (Real-Time Voice Interface)
 
-RTVI is the protocol used by Pipecat for client–server messaging (bot-ready, send-text, errors, etc.). The Go implementation provides:
+RTVI is the client–server messaging protocol (bot-ready, send-text, errors, etc.). The Go implementation provides:
 
 - **RTVIProcessor** (`plugins`: `rtvi`): Handles `StartFrame` (sends bot-ready), `RTVIClientMessageFrame` (client-ready, send-text → `TranscriptionFrame`), and `ErrorFrame` (sends RTVI error).
 - **RTVI serializer**: When the WebSocket connection uses `?rtvi=1`, the server uses the RTVI serializer so that client messages are parsed into `RTVIClientMessageFrame` and pipeline frames are converted to RTVI server messages (bot-ready, bot-output, user-transcription, error, etc.).
@@ -68,4 +68,4 @@ RTVI is the protocol used by Pipecat for client–server messaging (bot-ready, s
 - **Client → server**: `client-ready`, `send-text` (data: `content`, optional `options`).
 - **Server → client**: `bot-ready` (version, about), `bot-output` (text), `user-transcription` (text, final), `error` (error, fatal), `bot-started-speaking`, `bot-stopped-speaking`.
 
-For full compatibility with Pipecat RTVI clients, see the [Pipecat RTVI protocol](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/processors/frameworks/rtvi.py). Deprecated actions/config are not implemented in the initial phases.
+For full compatibility with RTVI clients, see the upstream RTVI protocol. Deprecated actions/config are not implemented in the initial phases.

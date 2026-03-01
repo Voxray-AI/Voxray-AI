@@ -1,4 +1,4 @@
-// Package genesys provides Genesys AudioHook WebSocket protocol serializer for Pipecat.
+// Package genesys provides Genesys AudioHook WebSocket protocol serializer.
 // Protocol: text = JSON (open/opened/close/closed/ping/pong/update/event), binary = PCMU at 8kHz.
 package genesys
 

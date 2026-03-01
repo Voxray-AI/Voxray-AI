@@ -41,6 +41,6 @@ go run ./cmd/evals -config scripts/evals/config/scenarios.json -voila-config con
 - Summary is printed to stdout (pass/fail counts and per-scenario status).
 - Exit code 1 if any scenario failed.
 
-## Relation to upstream Pipecat evals
+## Relation to upstream evals
 
-The [pipecat-ai/pipecat scripts/evals](https://github.com/pipecat-ai/pipecat/tree/main/scripts/evals) are Python-based and use two bots in a Daily room (user bot + eval bot). This Go runner is a single-pipeline eval: one LLM run per scenario, no STT/TTS or transport. For full voice or multi-bot evals against a running Go service (e.g. WebSocket), you could extend the runner or use the upstream Python evals against a Go-backed endpoint.
+The upstream scripts/evals are Python-based and use two bots in a Daily room (user bot + eval bot). This Go runner is a single-pipeline eval: one LLM run per scenario, no STT/TTS or transport. For full voice or multi-bot evals against a running Go service (e.g. WebSocket), you could extend the runner or use the upstream Python evals against a Go-backed endpoint.

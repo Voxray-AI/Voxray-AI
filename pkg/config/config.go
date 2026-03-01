@@ -65,7 +65,7 @@ type Config struct {
 	InterruptionStrategy string `json:"interruption_strategy,omitempty"`
 	MinWords             int    `json:"min_words,omitempty"`
 
-	// Runner: Pipecat-style development runner (transport type, port, proxy for telephony).
+	// Runner: development runner (transport type, port, proxy for telephony).
 	// RunnerTransport: "webrtc" | "daily" | "twilio" | "telnyx" | "plivo" | "exotel" | "livekit" | "" (use Transport + /ws as before).
 	RunnerTransport string `json:"runner_transport,omitempty"`
 	// RunnerPort overrides Port when runner is used (default 8080; Python runner uses 7860).
@@ -77,7 +77,7 @@ type Config struct {
 	// DailyDialinWebhookSecret when set requires X-Webhook-Secret header to match for POST /daily-dialin-webhook. Overridden by VOILA_DAILY_DIALIN_WEBHOOK_SECRET.
 	DailyDialinWebhookSecret string `json:"daily_dialin_webhook_secret,omitempty"`
 
-	// Session store for Pipecat-style sessions (POST /start, /sessions/{id}/...).
+	// Session store for runner sessions (POST /start, /sessions/{id}/...).
 	// "memory" (default): in-memory per process; use for single instance or vertical scaling.
 	// "redis": shared store via Redis; use for horizontal scaling behind a load balancer.
 	SessionStore string `json:"session_store,omitempty"`

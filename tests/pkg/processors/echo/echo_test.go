@@ -26,3 +26,10 @@ func TestEcho_NewDefaultName(t *testing.T) {
 	}
 }
 
+func TestEcho_New(t *testing.T) {
+	p := echo.New("echo")
+	if p == nil || p.Name() != "echo" {
+		t.Errorf("New: got %v", p)
+	}
+}
+

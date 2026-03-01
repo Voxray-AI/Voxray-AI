@@ -10,7 +10,7 @@ const DefaultSentenceEnd = ".!?"
 
 // MatchEndOfSentence reports whether s (after trim) ends with a sentence-ending rune.
 // Sentence-ending runes are from endChars; if endChars is empty, DefaultSentenceEnd is used.
-// This matches Python pipecat's match_endofsentence behavior for aggregators.
+// This matches match_endofsentence behavior for aggregators.
 func MatchEndOfSentence(s string, endChars string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" {

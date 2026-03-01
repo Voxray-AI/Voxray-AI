@@ -1,4 +1,4 @@
-// Package vonage provides Vonage Audio Connector WebSocket serializer for Pipecat.
+// Package vonage provides Vonage Audio Connector WebSocket serializer.
 package vonage
 
 import (

@@ -1,5 +1,5 @@
 // Package livekit provides LiveKit room URL and agent token configuration from environment
-// (aligned with Python pipecat/runner/livekit.py).
+// (runner Livekit integration).
 package livekit
 
 import (
@@ -33,7 +33,7 @@ func Configure() (*Config, error) {
 	if apiKey == "" || apiSecret == "" {
 		return nil, fmt.Errorf("LIVEKIT_API_KEY and LIVEKIT_API_SECRET are required")
 	}
-	token, err := generateAgentToken(roomName, "Pipecat Agent", apiKey, apiSecret)
+	token, err := generateAgentToken(roomName, "Voila Agent", apiKey, apiSecret)
 	if err != nil {
 		return nil, err
 	}

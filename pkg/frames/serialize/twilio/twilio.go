@@ -1,4 +1,4 @@
-// Package twilio provides Twilio Media Streams WebSocket protocol serializer for Pipecat.
+// Package twilio provides Twilio Media Streams WebSocket protocol serializer.
 package twilio
 
 import (

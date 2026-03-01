@@ -147,7 +147,7 @@ func (ss *ServiceSwitcher) ProcessFrame(ctx context.Context, f frames.Frame, dir
 }
 
 // LLMSwitcher is a ServiceSwitcher for LLM services. It uses the same mechanics; use NewServiceSwitcher
-// with LLM processor instances and a strategy. This type exists for API parity with the Python pipecat module.
+// with LLM processor instances and a strategy. This type exists for API parity with upstream.
 type LLMSwitcher struct {
 	*ServiceSwitcher
 }
