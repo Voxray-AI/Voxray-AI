@@ -45,7 +45,7 @@ type webrtcOfferResponse struct {
 func WebrtcOfferDoc() {}
 
 // setCORS sets CORS headers. When allowed is nil (not in config), sets Allow-Origin to * for backward compatibility.
-// When allowed is non-empty, sets Access-Control-Allow-Origin to the request's Origin only if it is in the list.
+// For production, set cors_allowed_origins in config to an explicit list; when non-empty, only matching origins are reflected.
 func setCORS(w http.ResponseWriter, r *http.Request, allowed []string, methods string) {
 	if allowed == nil {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -59,7 +59,18 @@ func setCORS(w http.ResponseWriter, r *http.Request, allowed []string, methods s
 		}
 	}
 	w.Header().Set("Access-Control-Allow-Methods", methods)
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
+}
+
+// defaultMaxRequestBodyBytes is used when config MaxRequestBodyBytes is zero (production safety).
+const defaultMaxRequestBodyBytes = 256 * 1024 // 256KB
+
+// effectiveMaxBodyBytes returns the configured limit or a safe default.
+func effectiveMaxBodyBytes(cfg *config.Config) int64 {
+	if cfg != nil && cfg.MaxRequestBodyBytes > 0 {
+		return cfg.MaxRequestBodyBytes
+	}
+	return defaultMaxRequestBodyBytes
 }
 
 // bodyReader returns r.Body, optionally wrapped with MaxBytesReader when maxBytes > 0.
@@ -68,6 +79,26 @@ func bodyReader(r *http.Request, w http.ResponseWriter, maxBytes int64) io.Reade
 		return r.Body
 	}
 	return http.MaxBytesReader(w, r.Body, maxBytes)
+}
+
+// requireAPIKey returns true if no ServerAPIKey is set or the request presents a valid key via Authorization: Bearer <key> or X-API-Key: <key>. Otherwise writes 401 JSON and returns false.
+func requireAPIKey(cfg *config.Config, w http.ResponseWriter, r *http.Request) bool {
+	if cfg == nil || cfg.ServerAPIKey == "" {
+		return true
+	}
+	key := r.Header.Get("X-API-Key")
+	if key == "" {
+		if auth := r.Header.Get("Authorization"); len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") {
+			key = strings.TrimSpace(auth[7:])
+		}
+	}
+	if key != cfg.ServerAPIKey {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+		return false
+	}
+	return true
 }
 
 // registerHandlers registers the web file server (when web/ exists), Swagger, Pipecat-style /start and /sessions when WebRTC is enabled, and the WebRTC /webrtc/offer handler on mux.
@@ -137,6 +168,9 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
+			if !requireAPIKey(cfg, w, r) {
+				return
+			}
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -146,7 +180,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 			var req struct {
 				Offer string `json:"offer"`
 			}
-			body := bodyReader(r, w, cfg.MaxRequestBodyBytes)
+			body := bodyReader(r, w, effectiveMaxBodyBytes(cfg))
 			if err := json.NewDecoder(body).Decode(&req); err != nil || req.Offer == "" {
 				http.Error(w, "invalid offer payload", http.StatusBadRequest)
 				return
@@ -334,6 +368,12 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
+			if cfg.DailyDialinWebhookSecret != "" && r.Header.Get("X-Webhook-Secret") != cfg.DailyDialinWebhookSecret {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+				return
+			}
 			defer r.Body.Close()
 			var payload struct {
 				Test       bool   `json:"test"`
@@ -342,7 +382,8 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 				CallID     string `json:"callId"`
 				CallDomain string `json:"callDomain"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			body := bodyReader(r, w, effectiveMaxBodyBytes(cfg))
+			if err := json.NewDecoder(body).Decode(&payload); err != nil {
 				http.Error(w, "invalid JSON payload", http.StatusBadRequest)
 				return
 			}
@@ -381,6 +422,9 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if !requireAPIKey(cfg, w, r) {
+			return
+		}
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -391,7 +435,11 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 			EnableDefaultIceServers bool                   `json:"enableDefaultIceServers"`
 			Body                    map[string]interface{} `json:"body"`
 		}
-		_ = json.NewDecoder(bodyReader(r, w, cfg.MaxRequestBodyBytes)).Decode(&req)
+		body := bodyReader(r, w, effectiveMaxBodyBytes(cfg))
+		if err := json.NewDecoder(body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
 		// Daily: create room + token and return dailyRoom, dailyToken, sessionId
 		if req.CreateDailyRoom {
 			opts := daily.Options{
@@ -435,6 +483,9 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 	})
 
 	mux.HandleFunc("/sessions/", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAPIKey(cfg, w, r) {
+			return
+		}
 		// Path: /sessions/{sessionId}/api/offer or /sessions/{sessionId}/...
 		path := r.URL.Path
 		if len(path) <= len("/sessions/") {
@@ -451,6 +502,10 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 		}
 		if sessionID == "" {
 			sessionID = rest
+		}
+		if _, err := uuid.Parse(sessionID); err != nil {
+			http.Error(w, "invalid session_id format", http.StatusBadRequest)
+			return
 		}
 		sess, err := store.Get(sessionID)
 		if err != nil {
@@ -490,7 +545,7 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 			RequestData      map[string]interface{} `json:"request_data"`
 			RequestDataAlt   map[string]interface{} `json:"requestData"`
 		}
-		body := bodyReader(r, w, cfg.MaxRequestBodyBytes)
+		body := bodyReader(r, w, effectiveMaxBodyBytes(cfg))
 		if err := json.NewDecoder(body).Decode(&offerReq); err != nil || offerReq.SDP == "" {
 			http.Error(w, "invalid WebRTC request", http.StatusBadRequest)
 			return
@@ -565,6 +620,11 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 			registerHandlers(mux, cfg, ctx, onTransport, sessionStore)
 		},
 	}
+	if cfg.ServerAPIKey != "" {
+		server.CheckAuth = func(w http.ResponseWriter, r *http.Request) bool {
+			return requireAPIKey(cfg, w, r)
+		}
+	}
 	if cfg.TLSEnable && cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
 		server.TLSCertFile = cfg.TLSCertFile
 		server.TLSKeyFile = cfg.TLSKeyFile
@@ -613,6 +673,11 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 		RegisterHandlers: func(mux *http.ServeMux) {
 			registerHandlers(mux, cfg, ctx, onTransport, sessionStore)
 		},
+	}
+	if cfg.ServerAPIKey != "" {
+		server.CheckAuth = func(w http.ResponseWriter, r *http.Request) bool {
+			return requireAPIKey(cfg, w, r)
+		}
 	}
 
 	return server.ServeWithListener(ctx, listener)

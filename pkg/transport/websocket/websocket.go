@@ -70,10 +70,14 @@ type ConnTransport struct {
 	lastActivity atomic.Int64
 }
 
+// DefaultReadLimit is the maximum WebSocket message size in bytes (1MB). Prevents memory exhaustion from oversized frames.
+const DefaultReadLimit = 1 << 20
+
 // NewConnTransport builds a transport for an already-upgraded WebSocket connection.
 // If serializer is nil, JSON text messages are used. inBuf and outBuf set channel sizes; zero or negative values default to 64.
 // The caller must not use conn for reads or writes after passing it here.
 func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serialize.Serializer) *ConnTransport {
+	conn.SetReadLimit(DefaultReadLimit)
 	if inBuf <= 0 {
 		inBuf = 64
 	}
@@ -296,6 +300,8 @@ type Server struct {
 	// TLS: when both are non-empty, ListenAndServe uses ListenAndServeTLS(certFile, keyFile).
 	TLSCertFile string
 	TLSKeyFile  string
+	// CheckAuth if non-nil is called before upgrading to WebSocket. If it returns false, the handler returns (caller should have written 401).
+	CheckAuth func(http.ResponseWriter, *http.Request) bool
 }
 
 // ListenAndServe starts the HTTP server and blocks until ctx is canceled.
@@ -303,6 +309,9 @@ type Server struct {
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if s.CheckAuth != nil && !s.CheckAuth(w, r) {
+			return
+		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			logger.Error("upgrade: %v", err)
@@ -390,6 +399,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 func (s *Server) ServeWithListener(ctx context.Context, listener net.Listener) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if s.CheckAuth != nil && !s.CheckAuth(w, r) {
+			return
+		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			logger.Error("upgrade: %v", err)

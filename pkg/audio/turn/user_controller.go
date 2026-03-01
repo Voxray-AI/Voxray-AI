@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"voila-go/pkg/frames"
+	"voila-go/pkg/logger"
 )
 
 // UserTurnController manages high-level user turn state: when a user turn
@@ -56,6 +57,14 @@ func (c *UserTurnController) ProcessVADUpdate(ctx context.Context, isSpeech bool
 		if !c.userSpeaking {
 			c.userSpeaking = true
 			c.startStrategy.OnUserStartedSpeaking()
+			// Always emit UserStartedSpeakingFrame on transition to speech so barge-in works
+			// even when we are still in a user turn (e.g. user interrupts bot before stop timeout).
+			if c.onPushFrame != nil {
+				logger.Info("turn: user started speaking (barge-in=%v)", c.userTurn)
+				if err := c.onPushFrame(ctx, frames.NewUserStartedSpeakingFrame()); err != nil {
+					return err
+				}
+			}
 			if !c.userTurn && c.startStrategy.ShouldStartTurn() {
 				if err := c.startTurn(ctx); err != nil {
 					return err
@@ -105,11 +114,8 @@ func (c *UserTurnController) startTurn(ctx context.Context) error {
 	c.userTurn = true
 	c.stopStrategy.Reset()
 	c.startStrategy.Reset()
-	// Start/refresh stop timer.
+	// Start/refresh stop timer. UserStartedSpeakingFrame is pushed in ProcessVADUpdate on transition to speech.
 	c.resetStopTimer(ctx)
-	if c.onPushFrame != nil {
-		return c.onPushFrame(ctx, frames.NewUserStartedSpeakingFrame())
-	}
 	return nil
 }
 

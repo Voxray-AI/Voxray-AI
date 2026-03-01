@@ -32,3 +32,8 @@ go.work
 .settings/
 .classpath
 *.wav
+
+# Config with secrets (use config.example.json as template, set api_keys via env)
+config.json
+.env
+.env.local

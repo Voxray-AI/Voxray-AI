@@ -79,8 +79,13 @@ func (p *Pipeline) Push(ctx context.Context, f frames.Frame) error {
 		return nil
 	}
 	// Log non-audio frames only to avoid flooding (audio frames are pushed at high rate).
-	if f != nil && !isHighVolumeFrame(f) {
-		logger.Info("pipeline: push frame type=%s id=%d", f.FrameType(), f.ID())
+	if f != nil {
+		switch f.(type) {
+		case *frames.AudioRawFrame, *frames.TTSAudioRawFrame:
+			// skip logging high-volume audio frames
+		default:
+			logger.Info("pipeline: push frame type=%s id=%d", f.FrameType(), f.ID())
+		}
 	}
 	return list[0].ProcessFrame(ctx, f, processors.Downstream)
 }
@@ -92,15 +97,6 @@ func (p *Pipeline) PushUpstream(ctx context.Context, f frames.Frame) error {
 		return nil
 	}
 	return list[len(list)-1].ProcessFrame(ctx, f, processors.Upstream)
-}
-
-func isHighVolumeFrame(f frames.Frame) bool {
-	switch f.(type) {
-	case *frames.AudioRawFrame, *frames.TTSAudioRawFrame:
-		return true
-	default:
-		return false
-	}
 }
 
 // Start pushes a StartFrame and stores it for reference; call once before feeding frames.

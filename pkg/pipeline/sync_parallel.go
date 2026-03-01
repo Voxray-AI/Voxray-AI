@@ -11,7 +11,7 @@ import (
 	"voila-go/pkg/processors"
 )
 
-func isSystemOrEndFrame(f frames.Frame) bool {
+func syncParallelIsSystemOrEndFrame(f frames.Frame) bool {
 	if f == nil {
 		return false
 	}
@@ -23,7 +23,7 @@ func isSystemOrEndFrame(f frames.Frame) bool {
 	}
 }
 
-func isSyncFrame(f frames.Frame) bool {
+func syncParallelIsSyncFrame(f frames.Frame) bool {
 	_, ok := f.(*frames.SyncFrame)
 	return ok
 }
@@ -104,7 +104,7 @@ func (sp *SyncParallelPipeline) ProcessFrame(ctx context.Context, f frames.Frame
 				if out == nil {
 					continue
 				}
-				if isSyncFrame(out) {
+				if syncParallelIsSyncFrame(out) {
 					goto nextBranch
 				}
 				collected = append(collected, out)

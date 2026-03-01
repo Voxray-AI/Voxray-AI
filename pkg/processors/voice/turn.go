@@ -37,6 +37,7 @@ type TurnProcessor struct {
 
 	firstAudioLog   sync.Once
 	audioChunkCount uint64
+	lastVADSpeech   bool // for optional VAD transition logging
 }
 
 // NewTurnProcessor returns a processor that buffers audio and forwards one segment per turn.
@@ -162,6 +163,10 @@ func (p *TurnProcessor) ProcessFrame(ctx context.Context, f frames.Frame, dir pr
 	isSpeech, err := p.VAD.IsSpeech(af)
 	if err != nil {
 		isSpeech = false
+	}
+	if isSpeech != p.lastVADSpeech {
+		logger.Debug("pipeline (turn): VAD speech=%v", isSpeech)
+		p.lastVADSpeech = isSpeech
 	}
 
 	// Feed VAD event into user turn controller to drive high-level start/stop/idle.

@@ -73,6 +73,8 @@ type Config struct {
 	ProxyHost string `json:"proxy_host,omitempty"`
 	// Dialin enables Daily PSTN dial-in webhook (POST /daily-dialin-webhook). Only with runner_transport=daily.
 	Dialin bool `json:"dialin,omitempty"`
+	// DailyDialinWebhookSecret when set requires X-Webhook-Secret header to match for POST /daily-dialin-webhook. Overridden by VOILA_DAILY_DIALIN_WEBHOOK_SECRET.
+	DailyDialinWebhookSecret string `json:"daily_dialin_webhook_secret,omitempty"`
 
 	// Session store for Pipecat-style sessions (POST /start, /sessions/{id}/...).
 	// "memory" (default): in-memory per process; use for single instance or vertical scaling.
@@ -98,6 +100,9 @@ type Config struct {
 
 	// MaxRequestBodyBytes limits JSON request body size (e.g. /webrtc/offer, /start). Zero = no limit. Overridden by VOILA_MAX_BODY_BYTES.
 	MaxRequestBodyBytes int64 `json:"max_request_body_bytes,omitempty"`
+
+	// ServerAPIKey when non-empty requires Authorization: Bearer <key> or X-API-Key: <key> for /start, /sessions/*, /webrtc/offer, /ws. Overridden by VOILA_SERVER_API_KEY.
+	ServerAPIKey string `json:"server_api_key,omitempty"`
 }
 
 // GetAPIKey returns the API key for the given service, checking the config first,
@@ -235,6 +240,12 @@ func ApplyEnvOverrides(cfg *Config) {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
 			cfg.MaxRequestBodyBytes = n
 		}
+	}
+	if v := os.Getenv("VOILA_SERVER_API_KEY"); v != "" {
+		cfg.ServerAPIKey = v
+	}
+	if v := os.Getenv("VOILA_DAILY_DIALIN_WEBHOOK_SECRET"); v != "" {
+		cfg.DailyDialinWebhookSecret = v
 	}
 }
 

@@ -10,7 +10,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const defaultKeyPrefix = "voila:session:"
+const (
+	defaultKeyPrefix    = "voila:session:"
+	defaultRedisTimeout = 10 * time.Second
+)
 
 // RedisSessionStore stores sessions in Redis with a configurable TTL and key prefix.
 type RedisSessionStore struct {
@@ -53,7 +56,8 @@ func (s *RedisSessionStore) Put(id string, sess *Session) error {
 	if err != nil {
 		return fmt.Errorf("marshal session: %w", err)
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultRedisTimeout)
+	defer cancel()
 	if err := s.client.Set(ctx, s.key(id), data, s.ttl).Err(); err != nil {
 		return fmt.Errorf("redis set: %w", err)
 	}
@@ -62,7 +66,8 @@ func (s *RedisSessionStore) Put(id string, sess *Session) error {
 
 // Get returns the session for id, or (nil, nil) if not found.
 func (s *RedisSessionStore) Get(id string) (*Session, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultRedisTimeout)
+	defer cancel()
 	data, err := s.client.Get(ctx, s.key(id)).Bytes()
 	if err == redis.Nil {
 		return nil, nil
@@ -79,7 +84,8 @@ func (s *RedisSessionStore) Get(id string) (*Session, error) {
 
 // Delete removes the session for id. Idempotent.
 func (s *RedisSessionStore) Delete(id string) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultRedisTimeout)
+	defer cancel()
 	if err := s.client.Del(ctx, s.key(id)).Err(); err != nil {
 		return fmt.Errorf("redis del: %w", err)
 	}

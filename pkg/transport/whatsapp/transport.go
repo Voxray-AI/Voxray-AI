@@ -2,10 +2,16 @@
 package whatsapp
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"voila-go/pkg/frames"
@@ -121,10 +127,13 @@ func (t *Transport) outputLoop(ctx context.Context) {
 	}
 }
 
+// MaxWebhookBodyBytes is the maximum POST body size for WhatsApp webhook (256KB).
+const MaxWebhookBodyBytes = 256 * 1024
+
 // HandleWebhook handles the WhatsApp webhook verification (GET) and incoming messages (POST).
 // For GET with hub.mode=subscribe, respond with hub.challenge if verify_token matches.
-// For POST, parse the payload and push incoming messages to the transport's Input channel.
-func (t *Transport) HandleWebhook(verifyToken string) http.HandlerFunc {
+// For POST, when appSecret is non-empty, X-Hub-Signature-256 (HMAC-SHA256 of body) is verified; then the payload is parsed.
+func (t *Transport) HandleWebhook(verifyToken, appSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			mode := r.URL.Query().Get("hub.mode")
@@ -142,8 +151,28 @@ func (t *Transport) HandleWebhook(verifyToken string) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, MaxWebhookBodyBytes))
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+		if appSecret != "" {
+			sigHeader := r.Header.Get("X-Hub-Signature-256")
+			if !strings.HasPrefix(sigHeader, "sha256=") {
+				http.Error(w, "missing or invalid signature", http.StatusUnauthorized)
+				return
+			}
+			expectedSig := strings.TrimSpace(sigHeader[7:])
+			mac := hmac.New(sha256.New, []byte(appSecret))
+			mac.Write(body)
+			computedSig := hex.EncodeToString(mac.Sum(nil))
+			if len(expectedSig) != len(computedSig) || !hmac.Equal([]byte(computedSig), []byte(expectedSig)) {
+				http.Error(w, "invalid signature", http.StatusUnauthorized)
+				return
+			}
+		}
 		var payload WebhookPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		if err := json.NewDecoder(bytes.NewReader(body)).Decode(&payload); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

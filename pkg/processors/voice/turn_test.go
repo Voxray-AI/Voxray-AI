@@ -278,3 +278,59 @@ func TestTurnProcessorUserStopAndIdleTimeout(t *testing.T) {
 	}
 }
 
+// TestTurnProcessorBargeInEmitsUserStartedSpeakingWhenReSpeaking verifies that when the user
+// starts speaking again while still in a turn (e.g. interrupts the bot before the stop timeout),
+// UserStartedSpeakingFrame is emitted so barge-in works.
+func TestTurnProcessorBargeInEmitsUserStartedSpeakingWhenReSpeaking(t *testing.T) {
+	ctx := context.Background()
+	an := &fakeAnalyzer{state: turn.Incomplete}
+	v := &fakeVAD{isSpeech: true}
+
+	// Long stop timeout so we stay in "user turn" when user re-speaks (barge-in).
+	const stopTimeout = 1.0
+	const idleTimeout = 0.0
+
+	p := NewTurnProcessorWithUserTurn("turn", v, an, 16000, 1, false, stopTimeout, idleTimeout)
+
+	col := &collectProcessor{}
+	p.SetNext(col)
+
+	audioData := []byte{0x00, 0x00, 0x01, 0x00}
+	frame := frames.NewAudioRawFrame(audioData, 16000, 1, 0)
+
+	// 1) User speaks -> UserStartedSpeakingFrame (and turn starts).
+	if err := p.ProcessFrame(ctx, frame, processors.Downstream); err != nil {
+		t.Fatalf("ProcessFrame(speak) returned error: %v", err)
+	}
+	var startedCount int
+	for _, f := range col.received {
+		if _, ok := f.(*frames.UserStartedSpeakingFrame); ok {
+			startedCount++
+		}
+	}
+	if startedCount != 1 {
+		t.Fatalf("after first speech: expected 1 UserStartedSpeakingFrame, got %d", startedCount)
+	}
+
+	// 2) User stops (VAD false) - do not wait for stop timeout, so userTurn remains true.
+	v.isSpeech = false
+	if err := p.ProcessFrame(ctx, frame, processors.Downstream); err != nil {
+		t.Fatalf("ProcessFrame(silence) returned error: %v", err)
+	}
+
+	// 3) User speaks again (barge-in) -> must emit UserStartedSpeakingFrame again.
+	v.isSpeech = true
+	if err := p.ProcessFrame(ctx, frame, processors.Downstream); err != nil {
+		t.Fatalf("ProcessFrame(re-speak) returned error: %v", err)
+	}
+	startedCount = 0
+	for _, f := range col.received {
+		if _, ok := f.(*frames.UserStartedSpeakingFrame); ok {
+			startedCount++
+		}
+	}
+	if startedCount != 2 {
+		t.Fatalf("after re-speak (barge-in): expected 2 UserStartedSpeakingFrames total, got %d", startedCount)
+	}
+}
+
