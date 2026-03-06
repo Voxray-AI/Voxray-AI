@@ -33,6 +33,7 @@ This document tracks which upstream Python tests (see [upstream test tree](https
 - **test_filters.py** (Identity, FrameFilter, FunctionFilter, WakeCheck) — **Ported**. Identity/FrameFilter: `tests/pkg/processors/filters/filter_test.go`. WakeCheck: `tests/pkg/processors/filters/wake_check_filter_test.go`. FunctionFilter: **N/A** (no function-based filter in Go).
 - **test_aic_filter.py**, **test_aic_vad.py** — **N/A**. Python AIC-specific; no Go AIC implementation.
 - **test_markdown_text_filter.py**, **test_stt_mute_filter.py** — **N/A** (or add tests if Go gains these processors).
+- **test_noisereduce_filter.py** — **Partial**. Go: `pkg/audio/filters`, `pkg/processors/audio/audio_filter_processor.go`. Tests: `tests/pkg/processors/audio/audio_filter_processor_test.go` (basic gain-style filter chain; no external noisereduce dependency).
 
 #### Pipeline / frame processing
 
@@ -86,7 +87,7 @@ This document tracks which upstream Python tests (see [upstream test tree](https
 - **test_krisp_sdk_manager.py**, **test_krisp_viva_filter.py** — **N/A**. Krisp SDK is Python-specific.
 - **test_langchain.py** — **N/A**. LangChain is Python-specific.
 - **test_ivr_navigation.py** — **Ported**. Go: `pkg/extensions/ivr`. Tests: `tests/pkg/extensions/ivr/ivr_test.go` (DTMF, status completed, navigation multiple DTMF).
-- **test_interruption_strategies.py** — **Partial**. Go: `pkg/audio/turn`, interruption handling. Documented.
+- **test_interruption_strategies.py** — **Partial**. Go: `pkg/audio/turn`, `pkg/audio/interruptions`, `pkg/processors/voice/interruption_controller.go`. Tests: `tests/pkg/audio/interruptions/interruptions_test.go` (min-words strategy behavior).
 
 #### Subdirs
 

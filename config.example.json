@@ -29,6 +29,18 @@
     "stt_mute_filter": {
       "strategies": ["first_speech", "always"]
     },
+    "audio_filter": {
+      "filters": [
+        {
+          "type": "gain",
+          "gain": 0.9
+        }
+      ]
+    },
+    "interruption_controller": {
+      "strategy": "min_words",
+      "min_words": 3
+    },
     "external_chain": {
       "url": "http://localhost:8765/chain",
       "stream": true,
