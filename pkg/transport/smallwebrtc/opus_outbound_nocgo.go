@@ -1,4 +1,4 @@
-﻿//go:build !cgo
+//go:build !cgo
 
 package smallwebrtc
 
@@ -13,6 +13,7 @@ import (
 	"voxray-go/pkg/audio"
 	"voxray-go/pkg/frames"
 	"voxray-go/pkg/logger"
+	"voxray-go/pkg/metrics"
 )
 
 func init() {
@@ -103,6 +104,7 @@ func runOutboundEncode(track *webrtc.TrackLocalStaticSample, outCh <-chan frames
 					logger.Error("smallwebrtc: write sample: %v", err)
 				}
 			}
+			metrics.WebRTCBytesSentTotal.WithLabelValues("egress", "", "").Add(float64(len(encoded)))
 		}
 	}
 }

@@ -1,11 +1,13 @@
-﻿package voice
+package voice
 
 import (
 	"context"
 	"sync"
+	"time"
 
 	"voxray-go/pkg/frames"
 	"voxray-go/pkg/logger"
+	"voxray-go/pkg/metrics"
 	"voxray-go/pkg/processors"
 	"voxray-go/pkg/services"
 )
@@ -102,14 +104,30 @@ func (p *LLMProcessor) runLLMWithMessages(ctx context.Context, messages []map[st
 	}
 	msgsToSend = append(msgsToSend, messages...)
 
+	start := time.Now()
 	var fullContent string
+	var firstTokenAt time.Time
+	var lastTokenAt time.Time
 	err := p.LLM.Chat(ctx, msgsToSend, func(tf *frames.LLMTextFrame) {
+		now := time.Now()
+		if firstTokenAt.IsZero() {
+			firstTokenAt = now
+			metrics.LLMTimeToFirstTokenSeconds.WithLabelValues("", "llm", "success", "").Observe(now.Sub(start).Seconds())
+		} else {
+			metrics.LLMInterTokenLatencySeconds.WithLabelValues("", "llm", "").Observe(now.Sub(lastTokenAt).Seconds())
+		}
+		lastTokenAt = now
 		fullContent += tf.Text
 		_ = p.PushDownstream(ctx, tf)
 	})
 	if err != nil {
+		metrics.LLMErrorsTotal.WithLabelValues("provider_error", "", "llm", "").Inc()
+		now := time.Since(start).Seconds()
+		metrics.LLMTimeToFirstTokenSeconds.WithLabelValues("", "llm", "error", "").Observe(now)
+		metrics.LLMGenerationLatencySeconds.WithLabelValues("", "llm", "error", "").Observe(now)
 		return err
 	}
+	metrics.LLMGenerationLatencySeconds.WithLabelValues("", "llm", "success", "").Observe(time.Since(start).Seconds())
 	if fullContent != "" {
 		preview := fullContent
 		if len(preview) > 80 {

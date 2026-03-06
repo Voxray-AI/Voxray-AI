@@ -17,6 +17,7 @@ import (
 	"voxray-go/pkg/audio"
 	"voxray-go/pkg/frames"
 	"voxray-go/pkg/logger"
+	"voxray-go/pkg/metrics"
 )
 
 // inboundOpusDecoder decodes a single Opus RTP payload to 48 kHz mono PCM (S16LE).
@@ -70,6 +71,7 @@ type Transport struct {
 	once             sync.Once
 	firstInboundLog  sync.Once
 	inboundChunkCount uint64 // total audio chunks pushed to pipeline (for STT)
+	activeCounted    bool
 }
 
 // Config holds SmallWebRTC options.
@@ -123,6 +125,9 @@ func (t *Transport) HandleOffer(offerSDP string) (answerSDP string, err error) {
 	}
 	t.pc = pc
 
+	// Metrics: new peer connection created.
+	metrics.WebRTCPeerConnectionsTotal.WithLabelValues("new", "", "webrtc").Inc()
+
 	var offer webrtc.SessionDescription
 	if err := json.Unmarshal([]byte(offerSDP), &offer); err != nil {
 		pc.Close()
@@ -163,8 +168,34 @@ func (t *Transport) HandleOffer(offerSDP string) (answerSDP string, err error) {
 	})
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		logger.Info("webrtc: connection state: %s", s.String())
-		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
+		state := s.String()
+		switch s {
+		case webrtc.PeerConnectionStateConnecting:
+			metrics.WebRTCPeerConnectionsTotal.WithLabelValues("connecting", "", "webrtc").Inc()
+		case webrtc.PeerConnectionStateConnected:
+			metrics.WebRTCPeerConnectionsTotal.WithLabelValues("connected", "", "webrtc").Inc()
+			if !t.activeCounted {
+				t.activeCounted = true
+				metrics.WebRTCPeerConnectionsActive.WithLabelValues("webrtc", "").Inc()
+			}
+		case webrtc.PeerConnectionStateFailed:
+			metrics.WebRTCPeerConnectionsTotal.WithLabelValues("failed", "", "webrtc").Inc()
+			metrics.WebRTCConnectionFailuresTotal.WithLabelValues("unknown", "webrtc").Inc()
+			if t.activeCounted {
+				t.activeCounted = false
+				metrics.WebRTCPeerConnectionsActive.WithLabelValues("webrtc", "").Dec()
+			}
 			_ = t.Close()
+		case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateClosed:
+			metrics.WebRTCPeerConnectionsTotal.WithLabelValues("closed", "", "webrtc").Inc()
+			if t.activeCounted {
+				t.activeCounted = false
+				metrics.WebRTCPeerConnectionsActive.WithLabelValues("webrtc", "").Dec()
+			}
+			_ = t.Close()
+		default:
+			// record raw state string for unexpected values
+			metrics.WebRTCPeerConnectionsTotal.WithLabelValues(state, "", "webrtc").Inc()
 		}
 	})
 
@@ -213,6 +244,7 @@ func (t *Transport) handleInboundTrack(track *webrtc.TrackRemote) {
 		if len(pkt.Payload) == 0 {
 			continue
 		}
+		metrics.WebRTCBytesReceivedTotal.WithLabelValues("ingress", "", "").Add(float64(len(pkt.Payload)))
 		rtpCount++
 		if firstRTP {
 			logger.Info("webrtc: first RTP packet received from mic (%d bytes payload)", len(pkt.Payload))

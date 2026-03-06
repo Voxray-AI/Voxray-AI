@@ -107,6 +107,11 @@ type Config struct {
 
 	// MCP configures the MCP (Model Context Protocol) client for tool integration. When set, tools from the MCP server are registered with the LLM.
 	MCP *MCPConfig `json:"mcp,omitempty"`
+
+	// MetricsEnabled toggles Prometheus metrics collection and exposure at /metrics.
+	// When omitted, metrics default to enabled to match README docs.
+	// When set explicitly to false, handlers avoid recording metrics and /metrics still exists but exports an empty registry.
+	MetricsEnabled *bool `json:"metrics_enabled,omitempty"`
 }
 
 // MCPConfig configures an MCP server connection (stdio: command + args). Used to register MCP tools with the LLM.
@@ -181,6 +186,18 @@ func (c *Config) VADParams() (p struct {
 	}
 	p.MinVolume = c.VADMinVolume
 	return p
+}
+
+// MetricsEnabledOrDefault reports whether Prometheus metrics should be recorded and exported.
+// When cfg or MetricsEnabled is nil, it defaults to true (metrics on by default).
+func (c *Config) MetricsEnabledOrDefault() bool {
+	if c == nil {
+		return true
+	}
+	if c.MetricsEnabled == nil {
+		return true
+	}
+	return *c.MetricsEnabled
 }
 
 // LoadConfig reads a JSON configuration file from the specified path and returns a Config struct.

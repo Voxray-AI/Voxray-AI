@@ -1,12 +1,14 @@
-﻿package voice
+package voice
 
 import (
 	"context"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"voxray-go/pkg/frames"
 	"voxray-go/pkg/logger"
+	"voxray-go/pkg/metrics"
 	"voxray-go/pkg/processors"
 	"voxray-go/pkg/services"
 )
@@ -127,11 +129,18 @@ func (p *TTSProcessor) speak(ctx context.Context, text string) error {
 	}
 	logger.Info("TTS: received text to speak: %d runes (batched), preview=%q", len(runes), preview)
 
+	start := time.Now()
 	audioFrames, err := p.TTS.Speak(ctx, text, p.SampleRate)
+	latency := time.Since(start).Seconds()
 	if err != nil {
+		metrics.TTSErrorsTotal.WithLabelValues("provider_error", "", "tts", "").Inc()
+		metrics.TTSTimeToFirstAudioChunkSeconds.WithLabelValues("", "tts", "error", "").Observe(latency)
+		metrics.TTSSynthesisLatencySeconds.WithLabelValues("", "tts", "error", "").Observe(latency)
 		_ = p.PushDownstream(ctx, frames.NewErrorFrame(err.Error(), false, p.Name()))
 		return nil
 	}
+	metrics.TTSTimeToFirstAudioChunkSeconds.WithLabelValues("", "tts", "success", "").Observe(latency)
+	metrics.TTSSynthesisLatencySeconds.WithLabelValues("", "tts", "success", "").Observe(latency)
 	for i, af := range audioFrames {
 		if !p.botSpeaking {
 			p.botSpeaking = true

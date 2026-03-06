@@ -1,13 +1,15 @@
-﻿// Package voice provides processors that wire STT, LLM, and TTS into a pipeline.
+// Package voice provides processors that wire STT, LLM, and TTS into a pipeline.
 package voice
 
 import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"voxray-go/pkg/frames"
 	"voxray-go/pkg/logger"
+	"voxray-go/pkg/metrics"
 	"voxray-go/pkg/processors"
 	"voxray-go/pkg/services"
 )
@@ -90,11 +92,18 @@ func (p *STTProcessor) ProcessFrame(ctx context.Context, f frames.Frame, dir pro
 	}
 
 	logger.Info("STT: audio packet received for transcription: %d bytes (%d Hz, %d ch), sending to STT API", len(toSend), p.SampleRate, p.Channels)
+	start := time.Now()
 	tfs, err := p.STT.Transcribe(ctx, toSend, p.SampleRate, p.Channels)
+	latency := time.Since(start).Seconds()
 	if err != nil {
+		metrics.STTErrorsTotal.WithLabelValues("provider_error", "", "stt", "").Inc()
+		metrics.STTTimeToFirstTokenSeconds.WithLabelValues("", "stt", "error", "").Observe(latency)
+		metrics.STTTranscriptionLatencySeconds.WithLabelValues("", "stt", "error", "").Observe(latency)
 		_ = p.PushDownstream(ctx, frames.NewErrorFrame(err.Error(), false, p.Name()))
 		return nil
 	}
+	metrics.STTTimeToFirstTokenSeconds.WithLabelValues("", "stt", "success", "").Observe(latency)
+	metrics.STTTranscriptionLatencySeconds.WithLabelValues("", "stt", "success", "").Observe(latency)
 	for _, tf := range tfs {
 		text := strings.TrimSpace(tf.Text)
 		if text == "" {

@@ -130,6 +130,14 @@ Configuration is JSON. Copy [config.example.json](config.example.json) to `confi
 - **[examples/voice/README.md](examples/voice/README.md)** — provider/model examples, `transport: "both"`, `webrtc_ice_servers`
 - **[tests/frontend/README.md](tests/frontend/README.md)** — WebRTC voice client usage
 
+### Prometheus metrics
+
+- **Endpoint**: the server exposes a Prometheus-compatible scrape endpoint at `/metrics` on the same host/port as `/ws` and `/webrtc/offer`.
+- **Config flag**: metrics collection is controlled by `metrics_enabled` in `config.json`:
+  - `"metrics_enabled": true` (default when omitted) enables recording of HTTP, WebRTC, STT, LLM, and TTS metrics and exports them at `/metrics`.
+  - `"metrics_enabled": false` disables recording; `/metrics` remains reachable but returns `204 No Content` so Prometheus scrape configs do not break.
+- **Scalability**: metrics are process-local (per instance); Prometheus aggregates across instances using its own `instance`/`pod` labels, and high-cardinality labels like `session_id` are safely handled via hashing/sampling.
+
 You can set the config path with the `-config` flag or the `VOXRAY_CONFIG` environment variable.
 
 ## Documentation

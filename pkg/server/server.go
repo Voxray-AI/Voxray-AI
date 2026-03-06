@@ -9,12 +9,15 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/swaggo/http-swagger"
 	_ "voxray-go/docs" // register generated Swagger spec
 	"voxray-go/pkg/config"
 	"voxray-go/pkg/logger"
+	"voxray-go/pkg/metrics"
 	"voxray-go/pkg/runner"
 	"voxray-go/pkg/transport"
 	"voxray-go/pkg/runner/daily"
@@ -62,6 +65,96 @@ func setCORS(w http.ResponseWriter, r *http.Request, allowed []string, methods s
 	}
 	w.Header().Set("Access-Control-Allow-Methods", methods)
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
+}
+
+// routeName is a low-cardinality identifier used for HTTP metrics.
+func routeName(path, fallback string) string {
+	switch {
+	case path == "/health":
+		return "health"
+	case path == "/ready":
+		return "ready"
+	case path == "/webrtc/offer":
+		return "webrtc_offer"
+	case path == "/start":
+		return "start"
+	case strings.HasPrefix(path, "/sessions/") && strings.HasSuffix(path, "/api/offer"):
+		return "session_offer"
+	case path == "/telephony/ws":
+		return "telephony_ws"
+	case path == "/daily-dialin-webhook":
+		return "daily_dialin_webhook"
+	case path == "/":
+		return "root"
+	default:
+		if fallback != "" {
+			return fallback
+		}
+		return "other"
+	}
+}
+
+// metricsMiddleware wraps an http.Handler to record HTTP-level Prometheus metrics.
+func metricsMiddleware(next http.Handler, route string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		routeLabel := routeName(r.URL.Path, route)
+		method := r.Method
+
+		// Wrap ResponseWriter to capture status code.
+		type statusRecorder struct {
+			http.ResponseWriter
+			status int
+		}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		wrapped := http.ResponseWriter(rec)
+
+		metrics.HTTPActiveConnections.WithLabelValues(
+			routeLabel, "http", "ingress", "", "",
+		).Inc()
+		defer metrics.HTTPActiveConnections.WithLabelValues(
+			routeLabel, "http", "ingress", "", "",
+		).Dec()
+
+		next.ServeHTTP(wrapped, r)
+
+		statusCode := rec.status
+		duration := time.Since(start).Seconds()
+		statusClass := "success"
+		errorType := ""
+		if statusCode >= 500 {
+			statusClass = "error"
+			errorType = "5xx"
+		} else if statusCode >= 400 {
+			statusClass = "error"
+			errorType = "4xx"
+		}
+
+		codeStr := http.StatusText(statusCode)
+		if codeStr == "" {
+			codeStr = "unknown"
+		}
+
+		metrics.HTTPRequestsTotal.WithLabelValues(
+			method, routeLabel, codeStr, "", "http", "ingress", statusClass, "",
+		).Inc()
+		metrics.HTTPRequestDurationSeconds.WithLabelValues(
+			method, routeLabel, codeStr, "", "http", "ingress", statusClass, "",
+		).Observe(duration)
+
+		if errorType != "" {
+			metrics.HTTPErrorsTotal.WithLabelValues(method, routeLabel, errorType).Inc()
+		}
+	})
+}
+
+// wrapWithMetrics conditionally wraps h with metricsMiddleware based on cfg.MetricsEnabledOrDefault.
+// When metrics are disabled, it returns h unchanged.
+func wrapWithMetrics(cfg *config.Config, route string, h http.Handler) http.Handler {
+	if cfg == nil || cfg.MetricsEnabledOrDefault() {
+		return metricsMiddleware(h, route)
+	}
+	return h
 }
 
 // defaultMaxRequestBodyBytes is used when config MaxRequestBodyBytes is zero (production safety).
@@ -121,7 +214,7 @@ func requireAPIKey(cfg *config.Config, w http.ResponseWriter, r *http.Request) b
 // registerHandlers registers the web file server (when web/ exists), Swagger, runner /start and /sessions when WebRTC is enabled, and the WebRTC /webrtc/offer handler on mux.
 func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore) {
 	// Health (liveness): always 200 when process is up
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/health", wrapWithMetrics(cfg, "health", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -129,20 +222,23 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
-	// Metrics (Prometheus text format)
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		// Minimal Prometheus export: process up, optional counters can be added later.
-		_, _ = w.Write([]byte("# HELP voxray_up 1 if the server is running.\n# TYPE voxray_up gauge\nvoxray_up 1\n"))
-	})
+	})))
+	// Metrics (Prometheus text format) exposed from shared registry.
+	// Keep endpoint present even when disabled so scrape configs don't break;
+	// it will simply export an empty/zeroed registry in that case.
+	if cfg == nil || cfg.MetricsEnabledOrDefault() {
+		mux.Handle("/metrics", promhttp.HandlerFor(metrics.Registry, promhttp.HandlerOpts{}))
+	} else {
+		mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}
 	// Readiness: 200 when ready; if session store is Redis, check connectivity and return 503 when unreachable
-	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/ready", wrapWithMetrics(cfg, "ready", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -160,7 +256,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
+	})))
 	// Swagger
 	mux.Handle("/swagger/", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),
@@ -179,7 +275,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 		registerRunnerWebRTCRoutes(mux, cfg, ctx, onTransport, sessionStore)
 	}
 	if enableWebRTC {
-		mux.HandleFunc("/webrtc/offer", func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("/webrtc/offer", wrapWithMetrics(cfg, "webrtc_offer", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			setCORS(w, r, cfg.CORSAllowedOrigins, "POST, OPTIONS")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -232,7 +328,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 			}{Answer: answer}); err != nil {
 				logger.Error("encode webrtc answer: %v", err)
 			}
-		})
+		})))
 	}
 	// Telephony routes (runner: twilio, telnyx, plivo, exotel)
 	registerTelephonyRoutes(mux, cfg, ctx, onTransport)
@@ -248,7 +344,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 			mux.Handle("/", http.FileServer(http.Dir("web")))
 		} else {
 			// No other root handler: provide minimal response so GET / has a defined behavior (e.g. health checks)
-			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			mux.Handle("/", wrapWithMetrics(cfg, "root", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/" {
 					http.NotFound(w, r)
 					return
@@ -256,7 +352,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-			})
+			})))
 		}
 	}
 }
@@ -268,7 +364,7 @@ func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context
 		return
 	}
 	// POST / returns provider-specific XML that points Stream/Connect to wss://{host}/telephony/ws
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/", wrapWithMetrics(cfg, "telephony_root", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -308,9 +404,9 @@ func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "Bot started with " + t})
 			return
 		}
-	})
+	})))
 	// /telephony/ws: WebSocket with provider detection from first message(s)
-	mux.HandleFunc("/telephony/ws", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/telephony/ws", wrapWithMetrics(cfg, "telephony_ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -344,7 +440,7 @@ func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context
 			go onTransport(ctx, tr)
 		}
 		<-tr.Done()
-	})
+	})))
 }
 
 // registerDailyRoutes adds GET / (create room + redirect) and optionally POST /daily-dialin-webhook when RunnerTransport is "daily".
@@ -361,7 +457,7 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 		}
 	}
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/", wrapWithMetrics(cfg, "daily_root", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -377,10 +473,10 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 			return
 		}
 		http.NotFound(w, r)
-	})
+	})))
 
 	if cfg.Dialin {
-		mux.HandleFunc("/daily-dialin-webhook", func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("/daily-dialin-webhook", wrapWithMetrics(cfg, "daily_dialin_webhook", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -427,7 +523,7 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 				"dailyToken": c.Token,
 				"sessionId":  uuid.New().String(),
 			})
-		})
+		})))
 	}
 }
 
