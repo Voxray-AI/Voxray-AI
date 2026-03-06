@@ -1,11 +1,8 @@
-﻿package pipeline
+package pipeline
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"sync"
-	"time"
 
 	"voxray-go/pkg/frames"
 	"voxray-go/pkg/logger"
@@ -112,20 +109,10 @@ func (r *Runner) Run(ctx context.Context) error {
 						close(queueCh)
 						return
 					case queueCh <- f:
-						// #region agent log
+						// Log a sample of enqueued frames to the standard logger instead of a debug file.
 						if inCount%25 == 0 || inCount <= 2 {
-							if line, _ := json.Marshal(map[string]interface{}{
-								"sessionId": "9f73a2", "hypothesisId": "A", "location": "pipeline/runner.go:enqueue",
-								"message": "transport frame enqueued", "data": map[string]interface{}{"inCount": inCount, "frameType": f.FrameType()},
-								"timestamp": time.Now().UnixMilli(),
-							}); len(line) > 0 {
-								if fp, err := os.OpenFile("debug-9f73a2.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
-									_, _ = fp.Write(append(line, '\n'))
-									_ = fp.Close()
-								}
-							}
+							logger.Info("pipeline runner: transport frame enqueued (count=%d, frameType=%s)", inCount, f.FrameType())
 						}
-						// #endregion
 					}
 				}
 			}

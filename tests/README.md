@@ -103,3 +103,33 @@ Notes:
 
 - When the `web/` directory exists, the server serves the browser client at `/` and the WebRTC signaling endpoint at `/webrtc/offer`.
 - Transports: WebSocket (`/ws`) and SmallWebRTC (RTP/Opus audio tracks via `/webrtc/offer`).
+
+### Stress tests and CI
+
+Stress tests live in `tests/stress_testing/` (`http_stress_test.go`, `stress_harness_test.go`, `stress_mock_test.go`, `run_stress.sh`). They are skipped when running with the `-short` flag so CI can use `go test -short ./...` for fast runs.
+
+**Run all stress tests:**
+
+```bash
+go test -timeout 2m ./tests/stress_testing/...
+```
+
+**Run only the four main stress tests:**
+
+```bash
+go test -timeout 2m -run 'TestHTTPStress_MockOfferEndpoint|TestMockPipeline_Stress|TestStressHarness_Realistic|TestMockPipeline_NoGoroutineLeak' ./tests/stress_testing/
+```
+
+**Run a single stress test (e.g. HTTP layer):**
+
+```bash
+go test -timeout 2m -run TestHTTPStress_MockOfferEndpoint ./tests/stress_testing/
+```
+
+**Run via script (from repo root or tests/stress_testing):**
+
+```bash
+./tests/stress_testing/run_stress.sh
+```
+
+Stress tests assert on success rate and optional SLOs (min success rate, max P95 latency, min sessions/sec) via `StressResult.AssertSLO(cfg)`. To enforce stricter thresholds in CI, set `StressConfig.MinSuccessRate`, `MaxP95LatencyMs`, and/or `MinSessionsPerSec` in the test and call `result.AssertSLO(cfg)` after `RunStress`.
