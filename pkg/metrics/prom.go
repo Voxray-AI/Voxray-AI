@@ -240,6 +240,34 @@ var (
 	)
 )
 
+// Recording metrics.
+var (
+	RecordingJobsEnqueuedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "recording_jobs_enqueued_total",
+			Help: "Total number of recording upload jobs enqueued.",
+		},
+	)
+	RecordingJobsSuccessTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "recording_jobs_success_total",
+			Help: "Total number of recording upload jobs that succeeded.",
+		},
+	)
+	RecordingJobsFailedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "recording_jobs_failed_total",
+			Help: "Total number of recording upload jobs that failed.",
+		},
+	)
+	RecordingQueueDepth = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "recording_queue_depth",
+			Help: "Current number of pending recording upload jobs in the queue.",
+		},
+	)
+)
+
 func init() {
 	metrics := []prometheus.Collector{
 		HTTPRequestsTotal, HTTPRequestDurationSeconds, HTTPActiveConnections, HTTPErrorsTotal, HTTPTimeoutTotal,
@@ -248,6 +276,7 @@ func init() {
 		STTErrorsTotal, STTFallbackTotal, STTTimeToFirstTokenSeconds, STTTranscriptionLatencySeconds, STTStreamingLagSeconds,
 		LLMErrorsTotal, LLMRetriesTotal, LLMFallbackTotal, LLMTimeToFirstTokenSeconds, LLMGenerationLatencySeconds, LLMInterTokenLatencySeconds,
 		TTSErrorsTotal, TTSFallbackTotal, TTSTimeToFirstAudioChunkSeconds, TTSSynthesisLatencySeconds, TTSStreamingLagSeconds,
+		RecordingJobsEnqueuedTotal, RecordingJobsSuccessTotal, RecordingJobsFailedTotal, RecordingQueueDepth,
 	}
 	for _, m := range metrics {
 		_ = Registry.Register(m)

@@ -130,6 +130,41 @@ Configuration is JSON. Copy [config.example.json](config.example.json) to `confi
 - **[examples/voice/README.md](examples/voice/README.md)** — provider/model examples, `transport: "both"`, `webrtc_ice_servers`
 - **[tests/frontend/README.md](tests/frontend/README.md)** — WebRTC voice client usage
 
+### Conversation recording to S3
+
+Voxray can record the **entire mixed conversation audio per session** and upload it **asynchronously** to an **S3 bucket** using a simple worker pool.
+
+- **Config block (`config.json`)**:
+  ```json
+  "recording": {
+    "enable": true,
+    "bucket": "your-recordings-bucket",
+    "base_path": "recordings/",
+    "format": "wav",
+    "worker_count": 4
+  }
+  ```
+  - **`enable`**: turn recording on for all sessions.
+  - **`bucket`**: S3 bucket name where recordings are stored.
+  - **`base_path`**: key prefix inside the bucket (default `recordings/`).
+  - **`format`**: file format/extension (currently `wav` for 16‑bit PCM mono).
+  - **`worker_count`**: number of background uploader workers (thread pool size).
+
+- **Environment overrides** (optional):
+  - `VOXRAY_RECORDING_ENABLE=true`
+  - `VOXRAY_RECORDING_BUCKET=your-recordings-bucket`
+  - `VOXRAY_RECORDING_BASE_PATH=recordings/`
+  - `VOXRAY_RECORDING_FORMAT=wav`
+  - `VOXRAY_RECORDING_WORKER_COUNT=4`
+
+Each call/session is written to a local WAV file and, when the session ends, a background job enqueues an S3 upload using the configured bucket and base path with a key like:
+
+```text
+<base_path>/yyyy/mm/dd/<session-id>.wav
+```
+
+AWS credentials and region are resolved via the standard AWS SDK v2 configuration (environment variables, shared config/credentials files, IAM role, etc.).
+
 ### Prometheus metrics
 
 - **Endpoint**: the server exposes a Prometheus-compatible scrape endpoint at `/metrics` on the same host/port as `/ws` and `/webrtc/offer`.

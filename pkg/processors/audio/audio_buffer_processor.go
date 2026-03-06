@@ -1,4 +1,4 @@
-﻿package audio
+package audio
 
 import (
 	"context"
@@ -50,6 +50,15 @@ func NewAudioBufferProcessor(name string, sampleRate, numChannels, bufferSize in
 		BufferSize:        bufferSize,
 		EnableTurnAudio:   enableTurnAudio,
 	}
+}
+
+// Cleanup ensures any buffered audio is flushed before the processor is torn down.
+func (p *AudioBufferProcessor) Cleanup(ctx context.Context) error {
+	p.StopRecording(ctx)
+	if p.BaseProcessor != nil {
+		return p.BaseProcessor.Cleanup(ctx)
+	}
+	return nil
 }
 
 // StartRecording enables buffering and resets buffers.

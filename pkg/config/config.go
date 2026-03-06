@@ -112,6 +112,23 @@ type Config struct {
 	// When omitted, metrics default to enabled to match README docs.
 	// When set explicitly to false, handlers avoid recording metrics and /metrics still exists but exports an empty registry.
 	MetricsEnabled *bool `json:"metrics_enabled,omitempty"`
+
+	// Recording controls conversation-wide audio recording and async upload.
+	Recording RecordingConfig `json:"recording,omitempty"`
+}
+
+// RecordingConfig controls per-call/session audio recording.
+type RecordingConfig struct {
+	// Enable turns recording on for all sessions.
+	Enable bool `json:"enable,omitempty"`
+	// Bucket is the destination S3 bucket for recordings.
+	Bucket string `json:"bucket,omitempty"`
+	// BasePath is the key prefix within the bucket (e.g. "recordings/").
+	BasePath string `json:"base_path,omitempty"`
+	// Format is the file format/extension to use (e.g. "wav").
+	Format string `json:"format,omitempty"`
+	// WorkerCount is the number of async uploader workers (thread pool size).
+	WorkerCount int `json:"worker_count,omitempty"`
 }
 
 // MCPConfig configures an MCP server connection (stdio: command + args). Used to register MCP tools with the LLM.
@@ -274,6 +291,23 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("VOXRAY_DAILY_DIALIN_WEBHOOK_SECRET"); v != "" {
 		cfg.DailyDialinWebhookSecret = v
+	}
+	if v := os.Getenv("VOXRAY_RECORDING_ENABLE"); v != "" {
+		cfg.Recording.Enable = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("VOXRAY_RECORDING_BUCKET"); v != "" {
+		cfg.Recording.Bucket = v
+	}
+	if v := os.Getenv("VOXRAY_RECORDING_BASE_PATH"); v != "" {
+		cfg.Recording.BasePath = v
+	}
+	if v := os.Getenv("VOXRAY_RECORDING_FORMAT"); v != "" {
+		cfg.Recording.Format = v
+	}
+	if v := os.Getenv("VOXRAY_RECORDING_WORKER_COUNT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Recording.WorkerCount = n
+		}
 	}
 }
 
