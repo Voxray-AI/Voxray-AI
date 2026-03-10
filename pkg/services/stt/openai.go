@@ -40,7 +40,10 @@ func (s *OpenAIService) Transcribe(ctx context.Context, audio []byte, sampleRate
 	if err := tmp.Close(); err != nil {
 		return nil, err
 	}
-	path, _ = filepath.Abs(path)
+	if absPath, err := filepath.Abs(path); err == nil {
+		path = absPath
+	}
+	// If Abs fails, path is used as-is (CreateTemp often returns an absolute path).
 	req := openai.AudioRequest{
 		Model:    openai.Whisper1,
 		FilePath: path,

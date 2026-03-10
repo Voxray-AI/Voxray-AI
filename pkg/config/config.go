@@ -50,7 +50,7 @@ type Config struct {
 	UserTurnStopTimeoutSecs float64 `json:"user_turn_stop_timeout_secs,omitempty"` // timeout with no activity before forcing user turn stop
 	// When >0, triggers a UserIdleFrame after the bot has finished speaking
 	// and the user has been idle for this duration.
-	UserIdleTimeoutSecs float64 `json:"user_idle_timeout_secs,omitempty"`
+	UserIDleTimeoutSecs float64 `json:"user_idle_timeout_secs,omitempty"`
 
 	// VAD analyzer configuration. When unset, defaults
 	// match the Python VADParams defaults.

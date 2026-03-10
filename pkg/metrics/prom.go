@@ -1,3 +1,5 @@
+// Package metrics provides the Prometheus registry and metric definitions for HTTP,
+// WebRTC, STT, LLM, TTS, recording, and session capacity.
 package metrics
 
 import (

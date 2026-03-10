@@ -1,4 +1,4 @@
-﻿package patternaggregator_test
+package patternaggregator_test
 
 import (
 	"reflect"
@@ -50,6 +50,6 @@ func TestAggregator_FeedIncremental(t *testing.T) {
 		t.Errorf("segments = %v; want at least one", allSegments)
 	}
 	remaining := agg.Flush()
-	// Any remaining buffered text (may be empty if all was emitted).
+	// remaining is any buffered text not yet emitted; may be empty (kept for inspection in test).
 	_ = remaining
 }

@@ -1,4 +1,4 @@
-﻿// Package voicemail provides ClassificationProcessor for voicemail vs conversation detection.
+// Package voicemail provides ClassificationProcessor for voicemail vs conversation detection.
 package voicemail
 
 import (
@@ -12,6 +12,9 @@ import (
 	"voxray-go/pkg/processors"
 	"voxray-go/pkg/sync/notifier"
 )
+
+// classificationPollInterval is how long to sleep when waiting for voicemail detection state.
+var classificationPollInterval = 100 * time.Millisecond
 
 // ClassificationProcessor aggregates LLM classification responses and triggers
 // gate notifiers and event handlers for CONVERSATION vs VOICEMAIL.
@@ -110,7 +113,7 @@ func (p *ClassificationProcessor) delayedVoicemailHandler(ctx context.Context) {
 		vd := p.voicemailDetected
 		p.mu.Unlock()
 		if !vd {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(classificationPollInterval)
 			continue
 		}
 		p.voicemailEventMu.Lock()

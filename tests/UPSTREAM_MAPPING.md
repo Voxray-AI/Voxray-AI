@@ -1,6 +1,6 @@
 ### Upstream test mapping
 
-This document tracks which upstream Python tests (see [upstream test tree](https://github.com/pipecat-ai/pipecat/tree/main/tests)) have been conceptually ported into the Voxray-Go test suite. The project is now named Voxray; the upstream reference is retained for historical test mapping.
+This document tracks which upstream Python tests (see [upstream test tree](https://github.com/pipecat-ai/pipecat/tree/main/tests) — upstream Pipecat-AI repo) have been conceptually ported into the Voxray-Go test suite. This project is **Voxray** / **Voxray-AI**; the link is retained for historical test mapping.
 
 **Status legend:** **Ported** = Go test(s) exist and cover the same behavior; **Partial** = some scenarios ported, extend Go tests; **To port** = Go code exists, add/extend tests; **N/A** = no Go equivalent (Python-only SDK/feature).
 

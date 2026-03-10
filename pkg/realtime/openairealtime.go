@@ -1,4 +1,4 @@
-﻿// Package realtime provides realtime session implementations (OpenAI Realtime API and shim).
+// Package realtime provides realtime session implementations (OpenAI Realtime API and shim).
 // RealtimeSession (SendText, SendAudio, Events, Close) and RealtimeService (NewSession) align with
 // OpenAI Realtime and WebSocket session abstractions: a long-lived bidirectional session over
 // WebSocket with event-driven input/output. OpenAIRealtimeAPI uses the official OpenAI Realtime
@@ -159,7 +159,7 @@ func (s *openAIRealtimeAPISession) Close(ctx context.Context) error {
 }
 
 func (s *openAIRealtimeAPISession) readLoop(ctx context.Context) {
-	defer func() { _ = s.Close(ctx) }()
+	defer func() { _ = s.Close(ctx) }() // best-effort close on exit
 	for {
 		_, data, err := s.conn.ReadMessage()
 		if err != nil {

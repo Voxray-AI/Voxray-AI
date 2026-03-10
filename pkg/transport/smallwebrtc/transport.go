@@ -57,7 +57,12 @@ const (
 	// Opus frame duration used for outbound (20 ms at 48 kHz = 960 samples).
 	opusFrameSamples = 960
 	opusFrameSize    = opusFrameSamples * 2 // 16-bit
+	// defaultTransportChanCap is the buffer size for Input/Output frame channels.
+	defaultTransportChanCap = 64
 )
+
+// iceGatherTimeout is the max wait for ICE candidate gathering before returning the SDP answer.
+var iceGatherTimeout = 10 * time.Second
 
 // Transport implements transport.Transport for WebRTC.
 // Input receives frames from the remote peer (e.g. decoded mic audio); Output sends frames to the remote peer (e.g. TTS).
@@ -86,8 +91,8 @@ type Config struct {
 func NewTransport(cfg *Config) *Transport {
 	return &Transport{
 		cfg:    cfg,
-		inCh:   make(chan frames.Frame, 64),
-		outCh:  make(chan frames.Frame, 64),
+		inCh:   make(chan frames.Frame, defaultTransportChanCap),
+		outCh:  make(chan frames.Frame, defaultTransportChanCap),
 		closed: make(chan struct{}),
 	}
 }
@@ -210,11 +215,14 @@ func (t *Transport) HandleOffer(offerSDP string) (answerSDP string, err error) {
 	gatherComplete := webrtc.GatheringCompletePromise(pc)
 	select {
 	case <-gatherComplete:
-	case <-time.After(10 * time.Second):
+	case <-time.After(iceGatherTimeout):
 		// Return current SDP even if gathering not complete (e.g. no STUN)
 	}
 
-	answerBytes, _ := json.Marshal(pc.LocalDescription())
+	answerBytes, err := json.Marshal(pc.LocalDescription())
+	if err != nil {
+		return "", fmt.Errorf("marshal answer: %w", err)
+	}
 	logger.Info("webrtc: answer created, session ready")
 	return string(answerBytes), nil
 }

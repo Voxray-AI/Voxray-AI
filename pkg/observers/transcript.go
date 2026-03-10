@@ -2,10 +2,10 @@ package observers
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"strings"
 
 	"voxray-go/pkg/frames"
 	"voxray-go/pkg/processors"

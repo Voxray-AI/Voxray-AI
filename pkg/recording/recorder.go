@@ -1,3 +1,4 @@
+// Package recording provides recording of voice sessions to local files and S3 upload.
 package recording
 
 import (

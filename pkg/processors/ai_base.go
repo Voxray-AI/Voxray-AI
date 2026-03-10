@@ -1,4 +1,4 @@
-﻿// Package processors: AIServiceBase provides a base for AI services with settings,
+// Package processors: AIServiceBase provides a base for AI services with settings,
 // Start/Stop/Cancel lifecycle, and optional metrics sync (mirrors upstream ai_service.py).
 package processors
 
@@ -52,18 +52,21 @@ func (b *AIServiceBase) ApplySettings(s ServiceSettings) {
 }
 
 // Start is called when a StartFrame is processed. Override for service-specific initialization.
+// Implementations may use ctx and frame; the base ignores them.
 func (b *AIServiceBase) Start(ctx context.Context, frame *frames.StartFrame) {
 	_ = ctx
 	_ = frame
 }
 
 // Stop is called when an EndFrame is processed. Override for cleanup.
+// Implementations may use ctx and frame; the base ignores them.
 func (b *AIServiceBase) Stop(ctx context.Context, frame *frames.EndFrame) {
 	_ = ctx
 	_ = frame
 }
 
 // Cancel is called when a CancelFrame is processed. Override for cancellation logic.
+// Implementations may use ctx and frame; the base ignores them.
 func (b *AIServiceBase) Cancel(ctx context.Context, frame *frames.CancelFrame) {
 	_ = ctx
 	_ = frame

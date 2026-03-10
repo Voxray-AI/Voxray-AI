@@ -23,6 +23,9 @@ const (
 	uploadBufSize       = 64 * 1024 // 64 KB for S3 read buffer
 )
 
+// uploadBackoffMax caps the backoff duration between S3 upload retries.
+var uploadBackoffMax = 30 * time.Second
+
 // RecordingJob describes a finalized recording to upload.
 type RecordingJob struct {
 	LocalPath string
@@ -115,14 +118,14 @@ func (u *Uploader) uploadOnce(ctx context.Context, job RecordingJob) error {
 				return ctx.Err()
 			case <-time.After(backoff):
 				backoff *= 2
-				if backoff > 30*time.Second {
-					backoff = 30 * time.Second
+				if backoff > uploadBackoffMax {
+					backoff = uploadBackoffMax
 				}
 			}
 		}
 		lastErr = u.putOne(ctx, job)
 		if lastErr == nil {
-			_ = os.Remove(job.LocalPath)
+			_ = os.Remove(job.LocalPath) // best-effort cleanup of local file after upload
 			return nil
 		}
 		if !isRetriable(lastErr) {

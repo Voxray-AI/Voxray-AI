@@ -20,8 +20,8 @@ var (
 	// System memory cache (Linux /proc/meminfo).
 	sysMemCache struct {
 		usedPercent float64
-		err        error
 		at         time.Time
+		err        error
 		mu         sync.Mutex
 	}
 	// Process memory cache (runtime.ReadMemStats).

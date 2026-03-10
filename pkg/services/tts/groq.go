@@ -1,4 +1,4 @@
-﻿// Package tts provides TTS service implementations (OpenAI TTS, Groq TTS).
+// Package tts provides TTS service implementations (OpenAI TTS, Groq TTS).
 package tts
 
 import (
@@ -69,7 +69,7 @@ func (s *GroqService) Speak(ctx context.Context, text string, sampleRate int) ([
 	if err != nil {
 		return nil, err
 	}
-	// Groq TTS returns 48 kHz; frame must report actual PCM rate
+	// sampleRate is unused; Groq decode returns the actual rate in outRate.
 	_ = sampleRate
 	f := frames.NewTTSAudioRawFrame(pcm, outRate)
 	return []*frames.TTSAudioRawFrame{f}, nil

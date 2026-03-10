@@ -53,7 +53,7 @@ func NewSQLStore(driver, dsn, table string) (*SQLStore, error) {
 		return nil, fmt.Errorf("transcripts: open db: %w", err)
 	}
 	if err := db.Ping(); err != nil {
-		_ = db.Close()
+		_ = db.Close() // best-effort close on teardown
 		return nil, fmt.Errorf("transcripts: ping db: %w", err)
 	}
 	db.SetMaxOpenConns(defaultMaxOpenConns)
@@ -69,7 +69,7 @@ func NewSQLStore(driver, dsn, table string) (*SQLStore, error) {
 	}
 	stmt, err := db.Prepare(query)
 	if err != nil {
-		_ = db.Close()
+		_ = db.Close() // best-effort close on teardown
 		return nil, fmt.Errorf("transcripts: prepare: %w", err)
 	}
 	return &SQLStore{
@@ -86,7 +86,7 @@ func (s *SQLStore) Close() error {
 		return nil
 	}
 	if s.stmt != nil {
-		_ = s.stmt.Close()
+		_ = s.stmt.Close() // best-effort close on teardown
 		s.stmt = nil
 	}
 	if s.db != nil {

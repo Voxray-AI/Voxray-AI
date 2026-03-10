@@ -73,13 +73,13 @@ func (p *STTProcessor) ProcessFrame(ctx context.Context, f frames.Frame, dir pro
 		}
 		return nil
 	}
-	audio, ok := f.(*frames.AudioRawFrame)
+	ar, ok := f.(*frames.AudioRawFrame)
 	if !ok {
 		return p.PushDownstream(ctx, f)
 	}
 
 	p.mu.Lock()
-	p.buf = append(p.buf, audio.Audio...)
+	p.buf = append(p.buf, ar.Audio...)
 	var toSend []byte
 	if len(p.buf) >= p.MinBufferBytes {
 		toSend = p.buf
