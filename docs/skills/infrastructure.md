@@ -70,6 +70,13 @@ This section covers **where and how Voxray runs**, including deployment topology
     - Understanding of **eventual consistency**: recording uploads may succeed after a session ends; errors are observable via metrics and logs, not via client responses.
     - Basic AWS knowledge (credentials and region resolution via standard SDK mechanisms).
 
+- **Session capacity and admission control — Intermediate**
+  - **Purpose**: Limit concurrent voice sessions (fixed and/or memory-based) and return HTTP 503 with `{"error":"server at capacity"}` when over limit.
+  - **Code**: `pkg/capacity` — system memory used % from `/proc/meminfo` on Linux, process heap via `runtime.ReadMemStats`, and `Hysteresis` for re-admission when usage drops below (threshold − hysteresis).
+  - **Server wiring**: `pkg/server/server.go` — `buildSessionCap(cfg)` returns `tryAcquire` / `releaseSlot`; used by the WebSocket server (`TryAcquireSlot` / `ReleaseSlot`), WebRTC `/webrtc/offer`, telephony `/telephony/ws`, runner `/start` and `/sessions/{id}/api/offer`, and Daily flows. The slot is released when the transport/session ends (e.g. after `tr.Done()`).
+  - **Config**: `max_concurrent_sessions`, `session_cap_memory_percent`, `session_cap_process_memory_mb`, `session_cap_memory_hysteresis_percent`; env overrides `VOXRAY_SESSION_CAP_*`; `config.ValidateSessionCap` at startup.
+  - **Skill implication**: Understanding admission control and 503 semantics; tuning caps and hysteresis for production.
+
 ---
 
 ### 3.3 Telephony, Daily.co, and External Voice Systems
@@ -111,6 +118,7 @@ This section covers **where and how Voxray runs**, including deployment topology
   - **Topology**:
     - In production, one or more Voxray instances sit behind a load balancer or reverse proxy (often terminating TLS).
     - For WebRTC and telephony, consider whether you need sticky sessions or rely on Redis session store to route offers/calls to any instance.
+  - **503 responses**: In addition to auth or transport errors, **503** is returned when **session capacity** is exceeded (fixed cap or memory-based cap); see Session capacity and admission control above.
 
 - **TLS & CORS — Intermediate**
   - **TLS**:
@@ -149,6 +157,7 @@ This section covers **where and how Voxray runs**, including deployment topology
     - WebRTC metrics (peer connection counts, bytes in/out, connection failures, reconnection attempts).
     - STT, LLM, and TTS metrics (errors, fallbacks, time‑to‑first‑token, total latency, streaming lag).
     - Recording queue metrics (jobs enqueued/succeeded/failed, queue depth).
+    - **Session capacity**: `active_sessions` gauge (current voice sessions), `sessions_rejected_total` counter with label `reason` (`fixed_cap`, `memory_system`, `memory_process`).
   - **Topology**:
     - `/metrics` exports a Prometheus text endpoint; metrics are per‑process and aggregated by Prometheus across instances.
     - Session IDs are **hashed and sampled** (`SampledSessionID`) to avoid high cardinality.

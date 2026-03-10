@@ -10,7 +10,7 @@ This section maps the concrete **languages, runtimes, and non‑AI libraries** u
   - **Role**: Primary language for the entire server (`cmd/voxray`, `pkg/**`, `tests/**`). All runtime behavior (pipelines, transports, providers, metrics, extensions) is implemented in Go.
   - **Key skills in this repo**:
     - **Concurrency & goroutines**: One goroutine per connection (`pipeline.Runner` in `pkg/pipeline/runner.go`), background workers for queues and recording, and observer wrapping. Ability to reason about cancellation via `context.Context` and proper shutdown.
-    - **Channels & backpressure**: Use of buffered channels to decouple I/O from processing (e.g. `inputQueueCap` buffering between transport and pipeline) and understanding how this affects latency and throughput.
+    - **Channels & backpressure**: Use of buffered channels to decouple I/O from processing (e.g. `inputQueueCap` buffering between transport and pipeline) and understanding how this affects latency and throughput. The pipeline **Sink** uses a single writer goroutine (Setup/Cleanup) to avoid one goroutine per frame; **PipelineTask** uses a bounded frame queue (default 64) with back-pressure when full.
     - **Interfaces & composition**: Core abstractions are defined as interfaces (`Transport`, `Processor`, `SessionStore`, `LLMService`, `RealtimeService`, etc.), with many implementations wired via factory/registry patterns.
     - **Error handling**: Explicit error returns, wrapping (`fmt.Errorf("...: %w", err)`), and decisions about when to log vs. propagate vs. drop errors (e.g. in observers or best-effort logging paths).
     - **Testing**: Familiarity with `testing` and external test packages (`tests/pkg/**`), along with table-driven tests for providers, metrics, and frame handling.
@@ -90,7 +90,7 @@ This section maps the concrete **languages, runtimes, and non‑AI libraries** u
   - **Key skills**:
     - Understanding labeling strategy (session ID sampling, stage, direction, status, model) and what high‑cardinality labels to avoid.
     - Adding new metrics in a way that respects the existing registry and init pattern, and correctly wiring them in observers or processors.
-    - Interpreting metrics for HTTP, WebRTC, STT, LLM, TTS, and recording jobs to diagnose performance issues.
+    - Interpreting metrics for HTTP, WebRTC, STT, LLM, TTS, recording jobs, and **session capacity** (`active_sessions`, `sessions_rejected_total{reason}`) to diagnose performance and admission issues.
   - **Why Intermediate**: Most contributors will at least read or slightly extend metrics; designing new metrics or debugging label cardinality benefits from some experience.
 
 - **Logging (go.uber.org/zap, std log wrappers) — Beginner/Intermediate**
@@ -126,7 +126,7 @@ This section maps the concrete **languages, runtimes, and non‑AI libraries** u
   - **Role**: `pkg/config` parses `config.json`, applies environment overrides (`ApplyEnvOverrides`), and exposes helpers for derived behavior (VAD params, metrics enablement, TLS, session store).
   - **Key skills**:
     - Safely adding config fields that can be overridden via environment variables, with sensible defaults and validation.
-    - Understanding how config drives transport modes, runner transports, providers, models, recording, transcripts, MCP, and plugins.
+    - Understanding how config drives transport modes, runner transports, providers, models, recording, transcripts, MCP, plugins, and **session capacity** (max concurrent sessions, memory-based caps, hysteresis); `ValidateSessionCap` runs at startup.
   - **Why Intermediate**: In a config‑driven system, most feature work involves adding or modifying config options without breaking existing setups.
 
 - **Processor registry & plugins (custom processors) — Advanced**
@@ -161,6 +161,11 @@ This section maps the concrete **languages, runtimes, and non‑AI libraries** u
     - Understanding the job queue pattern (enqueue on session end, worker goroutines performing uploads) and metrics instrumentation for successes/failures.
     - Reasoning about eventual consistency and retry strategies for uploads.
   - **Why Intermediate**: Contributors altering recording behavior need to understand how S3 operations interact with session lifecycles and observability.
+
+- **Shared HTTP client (pkg/services/httpclient) — Beginner/Intermediate**
+  - **Role**: Provider API calls (STT, LLM, TTS) can use the shared client from `pkg/services/httpclient` (tuned transport, connection reuse across concurrent sessions).
+  - **Key skills**: Using `httpclient.Client(timeout)` in new or updated provider adapters for consistent timeouts and connection pooling.
+  - **Why Beginner/Intermediate**: Simple to use; important for scaling under many concurrent sessions.
 
 ---
 

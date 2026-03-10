@@ -12,6 +12,7 @@ This section covers **LLM, STT, TTS, and Realtime** capabilities, how they are w
     - Global defaults: `provider`, `model`.
     - Per‑task overrides: `stt_provider`, `llm_provider`, `tts_provider`, `stt_model`, `tts_model`, `tts_voice`.
   - **Skill implication (Intermediate/Advanced Go + APIs)**: You must understand interface‑based design, streaming APIs, and how to surface provider differences through common abstractions.
+  - **HTTP clients**: Provider API calls (e.g. Anthropic, ElevenLabs STT/TTS) use `pkg/services/httpclient.Client(timeout)` for connection reuse and consistent timeouts across concurrent sessions.
 
 - **Frames as the AI wiring glue (`pkg/frames`)**
   - `TranscriptionFrame` carries user text from STT; `LLMTextFrame` carries streamed model output; `TTSSpeakFrame` requests speech generation; `TTSAudioRawFrame` (and related audio frames) carry synthesized audio.

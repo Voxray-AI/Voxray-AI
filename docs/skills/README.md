@@ -52,5 +52,5 @@ This `docs/skills` set is an **onboarding map** for new contributors: what you n
 
 - **Infra / SRE / platform engineer**
   - Read in order: **Infrastructure → DevOps & Tooling → Core Stack → Key Concepts**.
-  - Early tasks: stand up a production‑like deployment (Docker or Kubernetes), configure metrics scraping, and wire Redis/session store and transcripts DB. 
+  - Early tasks: stand up a production‑like deployment (Docker or Kubernetes), configure metrics scraping, wire Redis/session store and transcripts DB, and configure session caps and observe `active_sessions` / `sessions_rejected_total`. 
 

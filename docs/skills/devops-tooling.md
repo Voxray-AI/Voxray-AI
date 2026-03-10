@@ -131,6 +131,7 @@ This section describes how Voxray is **built, tested, linted, monitored, and rel
   - **Behavior**:
     - Exposes a Prometheus text endpoint at `/metrics` on the same host/port as `/ws` and `/webrtc/offer`.
     - When `metrics_enabled=false`, still serves `/metrics` but with `204 No Content` so scrape configs remain valid.
+    - **Session capacity** is observable via `active_sessions` (gauge) and `sessions_rejected_total` (counter by `reason`); useful for capacity planning and alerting when rejections spike.
   - **Skill implication**:
     - Ability to hook metrics into dashboards and alerts (Prometheus, Grafana), and to add new metrics while managing label cardinality.
 

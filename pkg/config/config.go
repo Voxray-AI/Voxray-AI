@@ -113,6 +113,16 @@ type Config struct {
 	// Zero means no limit (default).
 	MaxConcurrentSessions int `json:"max_concurrent_sessions,omitempty"`
 
+	// SessionCapMemoryPercent is a percentage (1-100). When > 0, reject new sessions when system memory used % >= this value.
+	// Semantics: reject when usage is at or above this percentage. Overridden by VOXRAY_SESSION_CAP_MEMORY_PERCENT.
+	SessionCapMemoryPercent float64 `json:"session_cap_memory_percent,omitempty"`
+	// SessionCapProcessMemoryMB is an absolute limit in megabytes (not a percentage). When > 0, reject when process memory >= this many MB.
+	// Overridden by VOXRAY_SESSION_CAP_PROCESS_MEMORY_MB.
+	SessionCapProcessMemoryMB int `json:"session_cap_process_memory_mb,omitempty"`
+	// SessionCapMemoryHysteresisPercent: when using system memory %, resume accepting only when usage falls below (SessionCapMemoryPercent - this).
+	// E.g. threshold 80 and hysteresis 5 → resume at 75%. Default 5 if unset. Overridden by VOXRAY_SESSION_CAP_MEMORY_HYSTERESIS_PERCENT.
+	SessionCapMemoryHysteresisPercent float64 `json:"session_cap_memory_hysteresis_percent,omitempty"`
+
 	// MetricsEnabled toggles Prometheus metrics collection and exposure at /metrics.
 	// When omitted, metrics default to enabled to match README docs.
 	// When set explicitly to false, handlers avoid recording metrics and /metrics still exists but exports an empty registry.
@@ -341,6 +351,45 @@ func ApplyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("VOXRAY_TRANSCRIPTS_TABLE"); v != "" {
 		cfg.Transcripts.TableName = v
 	}
+	if v := os.Getenv("VOXRAY_SESSION_CAP_MEMORY_PERCENT"); v != "" {
+		if p, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.SessionCapMemoryPercent = p
+		}
+	}
+	if v := os.Getenv("VOXRAY_SESSION_CAP_PROCESS_MEMORY_MB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.SessionCapProcessMemoryMB = n
+		}
+	}
+	if v := os.Getenv("VOXRAY_SESSION_CAP_MEMORY_HYSTERESIS_PERCENT"); v != "" {
+		if p, err := strconv.ParseFloat(v, 64); err == nil && p >= 0 {
+			cfg.SessionCapMemoryHysteresisPercent = p
+		}
+	}
+}
+
+// ValidateSessionCap checks session cap config and returns an error if invalid.
+// Call at server startup so invalid values (e.g. memory_percent 150 or 0.8) fail fast.
+func ValidateSessionCap(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.SessionCapMemoryPercent != 0 {
+		if cfg.SessionCapMemoryPercent <= 0 || cfg.SessionCapMemoryPercent > 100 {
+			return fmt.Errorf("session_cap_memory_percent must be in (0, 100], got %g", cfg.SessionCapMemoryPercent)
+		}
+	}
+	if cfg.SessionCapProcessMemoryMB != 0 {
+		if cfg.SessionCapProcessMemoryMB <= 0 {
+			return fmt.Errorf("session_cap_process_memory_mb must be > 0 when set, got %d", cfg.SessionCapProcessMemoryMB)
+		}
+	}
+	if cfg.SessionCapMemoryHysteresisPercent != 0 {
+		if cfg.SessionCapMemoryHysteresisPercent < 0 || cfg.SessionCapMemoryHysteresisPercent >= 100 {
+			return fmt.Errorf("session_cap_memory_hysteresis_percent must be in [0, 100), got %g", cfg.SessionCapMemoryHysteresisPercent)
+		}
+	}
+	return nil
 }
 
 // GetEnv returns the value of an environment variable, or def if unset.

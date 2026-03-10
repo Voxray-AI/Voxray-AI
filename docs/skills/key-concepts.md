@@ -114,12 +114,14 @@ Frames are Voxray’s **internal language** for everything: audio, text, control
   - Core API: `Add`, `Push`, `Start`, `Setup`, `Cleanup`, and `AddFromConfig` (plugin registry).
   - Supports nested/parallel pipelines via the `PipelineProcessor` pattern, used by voicemail detector and frameworks.
   - Voice pipeline is composed directly in `cmd/voxray/main.go`; plugin pipelines use names from `cfg.Plugins`.
+  - **Sink**: A single writer goroutine is started in `Setup`; frames are sent to an internal channel and forwarded to `Out` in one goroutine to avoid scheduler pressure at high TTS frame rates.
+  - **PipelineTask**: Bounded frame queue (default 64); when full, `QueueFrame` blocks (back-pressure) instead of unbounded growth.
 
 - **Observers (`pkg/observers`)**
   - Wrap processors to add **cross‑cutting behavior**:
     - Metrics: latency, error counts, streaming lag.
     - Turn tracking and user‑bot latency measurement.
-    - Transcript logging (`TranscriptObserver`) using per‑session `Store`.
+    - Transcript logging (`TranscriptObserver`) using per‑session `Store`. For non-blocking DB writes, use `Start(ctx)` with the session context (or `NewTranscriptObserverWithContext`); a background worker then performs `SaveMessage` so the pipeline does not block on the store. Call `Close()` when the session ends to drain and stop the worker. If `Start` is not called, behavior remains synchronous (legacy).
   - Implement `Observer` interfaces and are attached via `observers.WrapWithObserver`.
 
 **Skill implication**: When you need telemetry or side effects, **prefer observers** (or aggregators) over adding logic directly inside core processors, to keep responsibilities clean.

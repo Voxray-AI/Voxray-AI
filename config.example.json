@@ -98,6 +98,10 @@
   "server_api_key": "",
   "mcp": null,
   "max_concurrent_sessions": 0,
+  "_comment_cap": "Automatic session cap: set session_cap_memory_percent (e.g. 80) to reject when system memory used % >= this; session_cap_process_memory_mb is absolute MB limit for this process. Hysteresis (e.g. 5) resumes accepting when usage falls below threshold minus hysteresis.",
+  "session_cap_memory_percent": 0,
+  "session_cap_process_memory_mb": 0,
+  "session_cap_memory_hysteresis_percent": 5,
   "metrics_enabled": null,
   "recording": {
     "enable": false,

@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/swaggo/http-swagger"
 	_ "voxray-go/docs" // register generated Swagger spec
+	"voxray-go/pkg/capacity"
 	"voxray-go/pkg/config"
 	"voxray-go/pkg/logger"
 	"voxray-go/pkg/metrics"
@@ -755,10 +757,87 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 // StartServers starts the HTTP server that serves the WebSocket endpoint at /ws and, when transport is smallwebrtc or both, the WebRTC signaling endpoint at POST /webrtc/offer.
 // The onTransport callback is run in a new goroutine for each new connection.
 // If cfg is nil, StartServers returns nil without starting anything.
+const sessionCapCacheTTL = 3 * time.Second
+
+// buildSessionCap returns tryAcquire and releaseSlot for session admission.
+// When no cap is configured, tryAcquire always returns true and releaseSlot is a no-op.
+// Otherwise: fixed cap uses a semaphore; memory cap uses capacity checks (system MemAvailable + optional process MB) with hysteresis; active count is tracked for the active_sessions gauge.
+func buildSessionCap(cfg *config.Config) (tryAcquire func() bool, releaseSlot func()) {
+	hasFixed := cfg.MaxConcurrentSessions > 0
+	hasMemory := cfg.SessionCapMemoryPercent > 0 || cfg.SessionCapProcessMemoryMB > 0
+	if !hasFixed && !hasMemory {
+		return func() bool { return true }, func() {}
+	}
+
+	var sessionSem chan struct{}
+	if hasFixed {
+		sessionSem = make(chan struct{}, cfg.MaxConcurrentSessions)
+	}
+	var activeCount atomic.Int64
+	var hyst *capacity.Hysteresis
+	if cfg.SessionCapMemoryPercent > 0 {
+		hyst = &capacity.Hysteresis{}
+	}
+	hysteresisPct := cfg.SessionCapMemoryHysteresisPercent
+	if hysteresisPct == 0 {
+		hysteresisPct = 5
+	}
+
+	tryAcquire = func() bool {
+		if hasFixed {
+			select {
+			case sessionSem <- struct{}{}:
+			default:
+				metrics.SessionsRejectedTotal.WithLabelValues("fixed_cap").Inc()
+				return false
+			}
+		}
+		if cfg.SessionCapMemoryPercent > 0 {
+			used, err := capacity.SystemMemoryUsedPercent(sessionCapCacheTTL)
+			if err == nil && !hyst.Allow(used, cfg.SessionCapMemoryPercent, hysteresisPct) {
+				if hasFixed {
+					<-sessionSem
+				}
+				metrics.SessionsRejectedTotal.WithLabelValues("memory_system").Inc()
+				return false
+			}
+		}
+		if cfg.SessionCapProcessMemoryMB > 0 {
+			processMB := capacity.ProcessHeapSysMB(sessionCapCacheTTL)
+			if processMB >= uint64(cfg.SessionCapProcessMemoryMB) {
+				if hasFixed {
+					<-sessionSem
+				}
+				metrics.SessionsRejectedTotal.WithLabelValues("memory_process").Inc()
+				return false
+			}
+		}
+		activeCount.Add(1)
+		metrics.ActiveSessions.Set(float64(activeCount.Load()))
+		return true
+	}
+	releaseSlot = func() {
+		n := activeCount.Add(-1)
+		if n < 0 {
+			activeCount.Store(0)
+			n = 0
+		}
+		metrics.ActiveSessions.Set(float64(n))
+		if hasFixed && sessionSem != nil {
+			<-sessionSem
+		}
+	}
+	return tryAcquire, releaseSlot
+}
+
+// StartServers starts the HTTP server (and optional WebRTC) and blocks until ctx is canceled.
 // The server runs until ctx is canceled.
 func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport)) error {
 	if cfg == nil {
 		return nil
+	}
+	if err := config.ValidateSessionCap(cfg); err != nil {
+		return err
 	}
 
 	mode := cfg.Transport
@@ -781,26 +860,7 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 		}
 	}
 
-	var sessionSem chan struct{}
-	if cfg.MaxConcurrentSessions > 0 {
-		sessionSem = make(chan struct{}, cfg.MaxConcurrentSessions)
-	}
-	tryAcquire := func() bool {
-		if sessionSem == nil {
-			return true
-		}
-		select {
-		case sessionSem <- struct{}{}:
-			return true
-		default:
-			return false
-		}
-	}
-	releaseSlot := func() {
-		if sessionSem != nil {
-			<-sessionSem
-		}
-	}
+	tryAcquire, releaseSlot := buildSessionCap(cfg)
 
 	server := &ws.Server{
 		Host:           cfg.Host,
@@ -844,6 +904,9 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 	if cfg == nil {
 		return nil
 	}
+	if err := config.ValidateSessionCap(cfg); err != nil {
+		return err
+	}
 	mode := cfg.Transport
 	if mode == "" {
 		mode = "websocket"
@@ -859,26 +922,7 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 		}
 	}
 
-	var sessionSem chan struct{}
-	if cfg.MaxConcurrentSessions > 0 {
-		sessionSem = make(chan struct{}, cfg.MaxConcurrentSessions)
-	}
-	tryAcquire := func() bool {
-		if sessionSem == nil {
-			return true
-		}
-		select {
-		case sessionSem <- struct{}{}:
-			return true
-		default:
-			return false
-		}
-	}
-	releaseSlot := func() {
-		if sessionSem != nil {
-			<-sessionSem
-		}
-	}
+	tryAcquire, releaseSlot := buildSessionCap(cfg)
 
 	server := &ws.Server{
 		Host:           cfg.Host,

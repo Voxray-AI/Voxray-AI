@@ -240,6 +240,23 @@ var (
 	)
 )
 
+// Session capacity metrics (admission control and observability).
+var (
+	ActiveSessions = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "active_sessions",
+			Help: "Current number of active voice sessions (WebSocket and WebRTC).",
+		},
+	)
+	SessionsRejectedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "sessions_rejected_total",
+			Help: "Total number of session admissions rejected due to capacity.",
+		},
+		[]string{"reason"}, // fixed_cap, memory_system, memory_process
+	)
+)
+
 // Recording metrics.
 var (
 	RecordingJobsEnqueuedTotal = prometheus.NewCounter(
@@ -276,6 +293,7 @@ func init() {
 		STTErrorsTotal, STTFallbackTotal, STTTimeToFirstTokenSeconds, STTTranscriptionLatencySeconds, STTStreamingLagSeconds,
 		LLMErrorsTotal, LLMRetriesTotal, LLMFallbackTotal, LLMTimeToFirstTokenSeconds, LLMGenerationLatencySeconds, LLMInterTokenLatencySeconds,
 		TTSErrorsTotal, TTSFallbackTotal, TTSTimeToFirstAudioChunkSeconds, TTSSynthesisLatencySeconds, TTSStreamingLagSeconds,
+		ActiveSessions, SessionsRejectedTotal,
 		RecordingJobsEnqueuedTotal, RecordingJobsSuccessTotal, RecordingJobsFailedTotal, RecordingQueueDepth,
 	}
 	for _, m := range metrics {

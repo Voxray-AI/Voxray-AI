@@ -98,7 +98,7 @@ CGO needs **gcc** on your PATH. Use one of:
   `pacman -S mingw-w64-ucrt-x86_64-toolchain`  
   Add `C:\msys64\ucrt64\bin` (or your MSYS2 path) to PATH, then verify with `gcc --version`.
 
-Without CGO, WebRTC TTS will report *opus encoder unavailable (build without cgo); TTS audio cannot be sent* and the server may return **503** for WebRTC offers.
+Without CGO, WebRTC TTS will report *opus encoder unavailable (build without cgo); TTS audio cannot be sent* and the server may return **503** for WebRTC offers. The server also returns **503** when at capacity (session or memory cap; see [Session capacity and admission control](#session-capacity-and-admission-control)).
 
 ## Installation
 
@@ -256,12 +256,27 @@ Environment overrides:
 - `VOXRAY_TRANSCRIPTS_DSN=...`
 - `VOXRAY_TRANSCRIPTS_TABLE=call_transcripts`
 
+### Session capacity and admission control
+
+You can limit concurrent voice sessions and reject new connections when limits are reached (HTTP 503 and `{"error":"server at capacity"}`).
+
+- **Fixed cap**: Set `max_concurrent_sessions` (integer). When the limit is reached, new connections are rejected.
+- **Memory-based caps** (optional):
+  - `session_cap_memory_percent`: reject when system memory used % is at or above this (e.g. 80). Uses hysteresis so acceptance resumes when usage drops below (threshold − `session_cap_memory_hysteresis_percent`).
+  - `session_cap_process_memory_mb`: reject when process heap (MB) is at or above this.
+  - `session_cap_memory_hysteresis_percent`: default 5; only applies when `session_cap_memory_percent` is set.
+- **Environment overrides**: `VOXRAY_SESSION_CAP_MEMORY_PERCENT`, `VOXRAY_SESSION_CAP_PROCESS_MEMORY_MB`, `VOXRAY_SESSION_CAP_MEMORY_HYSTERESIS_PERCENT`.
+- **Scope**: Applies to WebSocket (`/ws`), WebRTC (`/webrtc/offer`), telephony (`/telephony/ws`), runner (`/start`, `/sessions/{id}/api/offer`), and Daily flows.
+
+See [config.example.json](config.example.json) for the `_comment_cap` and the full list of keys.
+
 ### Prometheus metrics
 
 - **Endpoint**: the server exposes a Prometheus-compatible scrape endpoint at `/metrics` on the same host/port as `/ws` and `/webrtc/offer`.
 - **Config flag**: metrics collection is controlled by `metrics_enabled` in `config.json`:
-  - `"metrics_enabled": true` (default when omitted) enables recording of HTTP, WebRTC, STT, LLM, and TTS metrics and exports them at `/metrics`.
+  - `"metrics_enabled": true` (default when omitted) enables recording of HTTP, WebRTC, STT, LLM, TTS, and session capacity metrics and exports them at `/metrics`.
   - `"metrics_enabled": false` disables recording; `/metrics` remains reachable but returns `204 No Content` so Prometheus scrape configs do not break.
+- **Metric areas**: HTTP, WebRTC, STT, LLM, TTS, recording queue, and **session capacity** (`active_sessions` gauge, `sessions_rejected_total` counter with label `reason`: `fixed_cap`, `memory_system`, `memory_process`).
 - **Scalability**: metrics are process-local (per instance); Prometheus aggregates across instances using its own `instance`/`pod` labels, and high-cardinality labels like `session_id` are safely handled via hashing/sampling.
 
 You can set the config path with the `-config` flag or the `VOXRAY_CONFIG` environment variable.
