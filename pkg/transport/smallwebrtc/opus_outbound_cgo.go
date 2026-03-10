@@ -4,6 +4,7 @@ package smallwebrtc
 
 import (
 	"encoding/binary"
+	"sync"
 	"time"
 
 	"github.com/pion/webrtc/v3"
@@ -15,6 +16,14 @@ import (
 	"voxray-go/pkg/logger"
 	"voxray-go/pkg/metrics"
 )
+
+// outboundSamplesPool reuses []int16 buffers for bytesToSamples to reduce allocs in the encode path.
+var outboundSamplesPool = sync.Pool{
+	New: func() interface{} {
+		s := make([]int16, opusFrameSamples)
+		return &s
+	},
+}
 
 func init() {
 	outboundEncoderAvailable = true
@@ -84,25 +93,27 @@ func runOutboundEncode(track *webrtc.TrackLocalStaticSample, outCh <-chan frames
 		for len(pcm) >= opusFrameSize {
 			frame := pcm[:opusFrameSize]
 			pcm = pcm[opusFrameSize:]
-			samples := bytesToSamples(frame)
-			encoded, err := enc.Encode(samples, opusFrameSamples, 1500)
-			if err != nil {
-				logger.Error("smallwebrtc: opus encode: %v", err)
-				continue
-			}
-			if len(encoded) == 0 {
-				continue
-			}
-			err = track.WriteSample(media.Sample{Data: encoded, Duration: frameDuration})
-			if err != nil {
-				select {
-				case <-closed:
+			withPooledSamples(frame, func(samples []int16) {
+				encoded, err := enc.Encode(samples, opusFrameSamples, 1500)
+				if err != nil {
+					logger.Error("smallwebrtc: opus encode: %v", err)
 					return
-				default:
-					logger.Error("smallwebrtc: write sample: %v", err)
 				}
-			}
-			metrics.WebRTCBytesSentTotal.WithLabelValues("egress", "", "").Add(float64(len(encoded)))
+				if len(encoded) == 0 {
+					return
+				}
+				err = track.WriteSample(media.Sample{Data: encoded, Duration: frameDuration})
+				if err != nil {
+					select {
+					case <-closed:
+						return
+					default:
+						logger.Error("smallwebrtc: write sample: %v", err)
+					}
+					return
+				}
+				metrics.WebRTCBytesSentTotal.WithLabelValues("egress", "", "").Add(float64(len(encoded)))
+			})
 			// Pace at real-time so the client's jitter buffer doesn't underrun or get overwhelmed (reduces stutter)
 			select {
 			case <-closed:
@@ -119,4 +130,22 @@ func bytesToSamples(b []byte) []int16 {
 		out[i] = int16(binary.LittleEndian.Uint16(b[i*2:]))
 	}
 	return out
+}
+
+// withPooledSamples gets a []int16 from the pool, fills it from b, calls fn, then Puts the buffer back.
+func withPooledSamples(b []byte, fn func(samples []int16)) {
+	n := len(b) / 2
+	ptr := outboundSamplesPool.Get().(*[]int16)
+	out := *ptr
+	if cap(out) < n {
+		out = make([]int16, n)
+		*ptr = out
+	} else {
+		out = out[:n]
+	}
+	for i := range out {
+		out[i] = int16(binary.LittleEndian.Uint16(b[i*2:]))
+	}
+	fn(out)
+	outboundSamplesPool.Put(ptr)
 }

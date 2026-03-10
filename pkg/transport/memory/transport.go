@@ -1,4 +1,4 @@
-﻿// Package memory provides an in-memory transport for testing and stress testing.
+// Package memory provides an in-memory transport for testing and stress testing.
 // It implements transport.Transport using channels only (no WebRTC). Callers push
 // frames via SendInput and read pipeline output via Out().
 package memory
@@ -41,6 +41,9 @@ func NewTransportWithBuffer(buf int) *Transport {
 		closed: make(chan struct{}),
 	}
 }
+
+// Done returns a channel that is closed when the transport is closed.
+func (t *Transport) Done() <-chan struct{} { return t.closed }
 
 // Input returns the channel of frames that the pipeline consumes (runner reads from this).
 func (t *Transport) Input() <-chan frames.Frame { return t.inCh }

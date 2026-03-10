@@ -61,6 +61,9 @@ func NewClientTransport(wsURL string, cfg *ClientConfig) (*ClientTransport, erro
 	}, nil
 }
 
+// Done returns a channel that is closed when the transport is closed.
+func (t *ClientTransport) Done() <-chan struct{} { return t.closed }
+
 // Input returns the channel of frames received from the server.
 // Closed when the transport is closed.
 func (t *ClientTransport) Input() <-chan frames.Frame { return t.inCh }

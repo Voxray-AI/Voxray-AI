@@ -1,7 +1,9 @@
 package recording
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,8 +13,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 
 	"voxray-go/pkg/metrics"
+)
+
+const (
+	uploadRetryAttempts = 3
+	uploadBufSize       = 64 * 1024 // 64 KB for S3 read buffer
 )
 
 // RecordingJob describes a finalized recording to upload.
@@ -98,22 +106,60 @@ func (u *Uploader) uploadOnce(ctx context.Context, job RecordingJob) error {
 	if job.LocalPath == "" || job.Bucket == "" || job.Key == "" {
 		return fmt.Errorf("invalid recording job: %+v", job)
 	}
+	var lastErr error
+	backoff := time.Second
+	for attempt := 0; attempt < uploadRetryAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+				backoff *= 2
+				if backoff > 30*time.Second {
+					backoff = 30 * time.Second
+				}
+			}
+		}
+		lastErr = u.putOne(ctx, job)
+		if lastErr == nil {
+			_ = os.Remove(job.LocalPath)
+			return nil
+		}
+		if !isRetriable(lastErr) {
+			return lastErr
+		}
+	}
+	return lastErr
+}
+
+func isRetriable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr smithy.APIError
+	if ok := errors.As(err, &apiErr); ok {
+		code := apiErr.ErrorCode()
+		switch code {
+		case "RequestTimeout", "ServiceUnavailable", "Throttling", "InternalError":
+			return true
+		}
+	}
+	return false
+}
+
+func (u *Uploader) putOne(ctx context.Context, job RecordingJob) error {
 	f, err := os.Open(job.LocalPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-
+	body := bufio.NewReaderSize(f, uploadBufSize)
 	_, err = u.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(job.Bucket),
 		Key:    aws.String(job.Key),
-		Body:   f,
+		Body:   body,
 	})
-	if err != nil {
-		return err
-	}
-	_ = os.Remove(job.LocalPath)
-	return nil
+	return err
 }
 
 // BuildS3Key builds a key like "<basePath>/yyyy/mm/dd/<callID>.wav".

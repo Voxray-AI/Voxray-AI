@@ -1,4 +1,4 @@
-﻿package sarvam
+package sarvam
 
 import (
 	"bytes"
@@ -13,6 +13,7 @@ import (
 	"voxray-go/pkg/config"
 	"voxray-go/pkg/frames"
 	"voxray-go/pkg/logger"
+	"voxray-go/pkg/services/httpclient"
 )
 
 // DefaultSarvamSTTModel is the default Sarvam STT model when none is specified.
@@ -59,9 +60,7 @@ func NewSTTWithLanguage(apiKey, model, languageCode string) *SarvamSTTService {
 		baseURL:      DefaultBaseURL,
 		model:        model,
 		languageCode: languageCode,
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		httpClient:   httpclient.Client(60 * time.Second),
 	}
 }
 

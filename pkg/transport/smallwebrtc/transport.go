@@ -92,6 +92,9 @@ func NewTransport(cfg *Config) *Transport {
 	}
 }
 
+// Done returns a channel that is closed when the transport is closed.
+func (t *Transport) Done() <-chan struct{} { return t.closed }
+
 // Input returns the channel of frames received from the remote peer (e.g. audio decoded to AudioRawFrame).
 // Closed when the transport is closed.
 func (t *Transport) Input() <-chan frames.Frame { return t.inCh }

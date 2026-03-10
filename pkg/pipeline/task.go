@@ -1,4 +1,4 @@
-﻿// Package pipeline provides Task and PipelineTask for queue-based pipeline execution.
+// Package pipeline provides Task and PipelineTask for queue-based pipeline execution.
 package pipeline
 
 import (
@@ -30,8 +30,13 @@ type Task interface {
 	HasFinished() bool
 }
 
+// DefaultPipelineTaskQueueSize is the buffer size for the frame queue. When the queue is full,
+// QueueFrame blocks (back-pressure). This avoids unbounded growth and keeps overflow behavior explicit.
+const DefaultPipelineTaskQueueSize = 64
+
 // PipelineTask runs a pipeline with a frame queue. Frames are queued and drained into the pipeline.
 // StopWhenDone pushes an EndFrame and stops when the pipeline has drained; Cancel pushes a CancelFrame.
+// Overflow policy: when the queue is full, QueueFrame blocks until the drain goroutine receives (back-pressure).
 type PipelineTask struct {
 	name     string
 	pipeline *Pipeline
@@ -41,13 +46,23 @@ type PipelineTask struct {
 	cancel   context.CancelFunc
 }
 
-// NewPipelineTask creates a task that runs the given pipeline. The queue is unbuffered by default;
-// QueueFrame blocks until the drain goroutine can receive. Call Run in a goroutine and then QueueFrame from other goroutines.
+// NewPipelineTask creates a task that runs the given pipeline. The queue is buffered (DefaultPipelineTaskQueueSize)
+// so producers can enqueue without blocking until the buffer is full; when full, QueueFrame blocks (back-pressure).
+// Call Run in a goroutine and then QueueFrame from other goroutines.
 func NewPipelineTask(name string, pl *Pipeline) *PipelineTask {
+	return NewPipelineTaskWithQueueSize(name, pl, DefaultPipelineTaskQueueSize)
+}
+
+// NewPipelineTaskWithQueueSize is like NewPipelineTask but sets the queue buffer size.
+// When the queue is full, QueueFrame blocks (back-pressure). Use queueSize 0 for unbuffered (original behavior).
+func NewPipelineTaskWithQueueSize(name string, pl *Pipeline, queueSize int) *PipelineTask {
 	if name == "" {
 		name = "PipelineTask"
 	}
-	return &PipelineTask{name: name, pipeline: pl, queue: make(chan frames.Frame)}
+	if queueSize < 0 {
+		queueSize = DefaultPipelineTaskQueueSize
+	}
+	return &PipelineTask{name: name, pipeline: pl, queue: make(chan frames.Frame, queueSize)}
 }
 
 // Name implements Task.
@@ -108,7 +123,7 @@ func (t *PipelineTask) Run(ctx context.Context, params TaskParams) error {
 	return ctx.Err()
 }
 
-// QueueFrame implements Task. It sends the frame to the queue; blocks if the drain is not reading.
+// QueueFrame implements Task. It sends the frame to the queue. When the queue buffer is full, it blocks (back-pressure).
 // After Run has returned, QueueFrame is a no-op.
 func (t *PipelineTask) QueueFrame(ctx context.Context, f frames.Frame) error {
 	t.mu.Lock()

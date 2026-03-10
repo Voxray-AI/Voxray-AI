@@ -1,4 +1,4 @@
-﻿package elevenlabs
+package elevenlabs
 
 import (
 	"bytes"
@@ -9,9 +9,11 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"time"
 
 	"voxray-go/pkg/config"
 	"voxray-go/pkg/frames"
+	"voxray-go/pkg/services/httpclient"
 )
 
 // pcmToWAV wraps raw 16-bit little-endian PCM in a minimal WAV header for API upload.
@@ -70,7 +72,7 @@ func NewSTT(apiKey, modelID string) *STTService {
 		modelID = defaultSTTModel
 	}
 	return &STTService{
-		client:  http.DefaultClient,
+		client:  httpclient.Client(60 * time.Second),
 		apiKey:  apiKey,
 		modelID: modelID,
 	}

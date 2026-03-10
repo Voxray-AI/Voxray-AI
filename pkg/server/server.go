@@ -151,7 +151,7 @@ func metricsMiddleware(next http.Handler, route string) http.Handler {
 // wrapWithMetrics conditionally wraps h with metricsMiddleware based on cfg.MetricsEnabledOrDefault.
 // When metrics are disabled, it returns h unchanged.
 func wrapWithMetrics(cfg *config.Config, route string, h http.Handler) http.Handler {
-	if cfg == nil || cfg.MetricsEnabledOrDefault() {
+	if cfg != nil && cfg.MetricsEnabledOrDefault() {
 		return metricsMiddleware(h, route)
 	}
 	return h
@@ -212,7 +212,7 @@ func requireAPIKey(cfg *config.Config, w http.ResponseWriter, r *http.Request) b
 }
 
 // registerHandlers registers the web file server (when web/ exists), Swagger, runner /start and /sessions when WebRTC is enabled, and the WebRTC /webrtc/offer handler on mux.
-func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore) {
+func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore, tryAcquire func() bool, releaseSlot func()) {
 	// Health (liveness): always 200 when process is up
 	mux.Handle("/health", wrapWithMetrics(cfg, "health", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -226,7 +226,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 	// Metrics (Prometheus text format) exposed from shared registry.
 	// Keep endpoint present even when disabled so scrape configs don't break;
 	// it will simply export an empty/zeroed registry in that case.
-	if cfg == nil || cfg.MetricsEnabledOrDefault() {
+	if cfg != nil && cfg.MetricsEnabledOrDefault() {
 		mux.Handle("/metrics", promhttp.HandlerFor(metrics.Registry, promhttp.HandlerOpts{}))
 	} else {
 		mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +272,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 		if sessionStore == nil {
 			sessionStore = runner.NewMemorySessionStore()
 		}
-		registerRunnerWebRTCRoutes(mux, cfg, ctx, onTransport, sessionStore)
+		registerRunnerWebRTCRoutes(mux, cfg, ctx, onTransport, sessionStore, tryAcquire, releaseSlot)
 	}
 	if enableWebRTC {
 		mux.Handle("/webrtc/offer", wrapWithMetrics(cfg, "webrtc_offer", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +282,12 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 				return
 			}
 			if !requireAPIKey(cfg, w, r) {
+				return
+			}
+			if tryAcquire != nil && !tryAcquire() {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":"server at capacity"}`))
 				return
 			}
 			if r.Method != http.MethodPost {
@@ -313,13 +319,24 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 				return
 			}
 			if err := tr.Start(ctx); err != nil {
+				if releaseSlot != nil {
+					releaseSlot()
+				}
 				logger.Error("smallwebrtc start: %v", err)
 				http.Error(w, "failed to start transport", http.StatusInternalServerError)
 				return
 			}
 
 			if onTransport != nil {
-				go onTransport(ctx, tr)
+				if releaseSlot != nil {
+					go func() {
+						defer releaseSlot()
+						onTransport(ctx, tr)
+						<-tr.Done()
+					}()
+				} else {
+					go onTransport(ctx, tr)
+				}
 			}
 
 			w.Header().Set("Content-Type", "application/json")
@@ -331,10 +348,10 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 		})))
 	}
 	// Telephony routes (runner: twilio, telnyx, plivo, exotel)
-	registerTelephonyRoutes(mux, cfg, ctx, onTransport)
+	registerTelephonyRoutes(mux, cfg, ctx, onTransport, tryAcquire, releaseSlot)
 
 	// Daily routes (runner: daily)
-	registerDailyRoutes(mux, cfg, ctx, onTransport)
+	registerDailyRoutes(mux, cfg, ctx, onTransport, tryAcquire, releaseSlot)
 
 	// Web root last so it doesn't override /start or /sessions (skip when telephony or daily uses /)
 	telephonyMode := cfg.RunnerTransport == "twilio" || cfg.RunnerTransport == "telnyx" || cfg.RunnerTransport == "plivo" || cfg.RunnerTransport == "exotel"
@@ -358,7 +375,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 }
 
 // registerTelephonyRoutes adds POST / (XML webhook) and /telephony/ws when RunnerTransport is a telephony provider.
-func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport)) {
+func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), tryAcquire func() bool, releaseSlot func()) {
 	t := cfg.RunnerTransport
 	if t != "twilio" && t != "telnyx" && t != "plivo" && t != "exotel" {
 		return
@@ -411,8 +428,17 @@ func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if tryAcquire != nil && !tryAcquire() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"server at capacity"}`))
+			return
+		}
 		conn, err := ws.Upgrade(w, r)
 		if err != nil {
+			if releaseSlot != nil {
+				releaseSlot()
+			}
 			logger.Error("telephony ws upgrade: %v", err)
 			return
 		}
@@ -422,19 +448,34 @@ func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context
 		_, second, _ = conn.ReadMessage()
 		data, ok := runner.ParseTelephonyMessage(first, second)
 		if !ok || data.Provider == "" {
+			if releaseSlot != nil {
+				releaseSlot()
+			}
 			logger.Error("telephony: could not detect provider from handshake")
 			return
 		}
 		getKey := func(service, envVar string) string { return cfg.GetAPIKey(service, envVar) }
 		ser := runner.BuildTelephonySerializer(data, getKey)
 		if ser == nil {
+			if releaseSlot != nil {
+				releaseSlot()
+			}
 			logger.Error("telephony: no serializer for provider %s", data.Provider)
 			return
 		}
 		tr := ws.NewConnTransport(conn, 64, 64, ser)
 		if err := tr.Start(ctx); err != nil {
+			if releaseSlot != nil {
+				releaseSlot()
+			}
 			logger.Error("telephony transport start: %v", err)
 			return
+		}
+		if releaseSlot != nil {
+			go func() {
+				defer releaseSlot()
+				<-tr.Done()
+			}()
 		}
 		if onTransport != nil {
 			go onTransport(ctx, tr)
@@ -444,7 +485,7 @@ func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context
 }
 
 // registerDailyRoutes adds GET / (create room + redirect) and optionally POST /daily-dialin-webhook when RunnerTransport is "daily".
-func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport)) {
+func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), tryAcquire func() bool, releaseSlot func()) {
 	if cfg.RunnerTransport != "daily" {
 		return
 	}
@@ -528,7 +569,7 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 }
 
 // registerRunnerWebRTCRoutes adds POST /start and POST/PATCH /sessions/{id}/api/offer (runner-style).
-func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), store runner.SessionStore) {
+func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), store runner.SessionStore, tryAcquire func() bool, releaseSlot func()) {
 	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
 		setCORS(w, r, cfg.CORSAllowedOrigins, "POST, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -669,9 +710,18 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 		if offerReq.RequestData == nil {
 			offerReq.RequestData = sess.Body
 		}
+		if tryAcquire != nil && !tryAcquire() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "server at capacity"})
+			return
+		}
 		tr := smallwebrtc.NewTransport(&smallwebrtc.Config{ICEServers: cfg.WebRTCICEServers})
 		answer, err := tr.HandleOffer(offerReq.SDP)
 		if err != nil {
+			if releaseSlot != nil {
+				releaseSlot()
+			}
 			logger.Error("sessions api/offer handle: %v", err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -679,12 +729,23 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 			return
 		}
 		if err := tr.Start(ctx); err != nil {
+			if releaseSlot != nil {
+				releaseSlot()
+			}
 			logger.Error("sessions api/offer start: %v", err)
 			http.Error(w, "failed to start transport", http.StatusInternalServerError)
 			return
 		}
 		if onTransport != nil {
-			go onTransport(ctx, tr)
+			if releaseSlot != nil {
+				go func() {
+					defer releaseSlot()
+					onTransport(ctx, tr)
+					<-tr.Done()
+				}()
+			} else {
+				go onTransport(ctx, tr)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"answer": answer, "type": "answer"})
@@ -720,6 +781,27 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 		}
 	}
 
+	var sessionSem chan struct{}
+	if cfg.MaxConcurrentSessions > 0 {
+		sessionSem = make(chan struct{}, cfg.MaxConcurrentSessions)
+	}
+	tryAcquire := func() bool {
+		if sessionSem == nil {
+			return true
+		}
+		select {
+		case sessionSem <- struct{}{}:
+			return true
+		default:
+			return false
+		}
+	}
+	releaseSlot := func() {
+		if sessionSem != nil {
+			<-sessionSem
+		}
+	}
+
 	server := &ws.Server{
 		Host:           cfg.Host,
 		Port:           port,
@@ -730,9 +812,11 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 			}
 		},
 		RegisterHandlers: func(mux *http.ServeMux) {
-			registerHandlers(mux, cfg, ctx, onTransport, sessionStore)
+			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, tryAcquire, releaseSlot)
 		},
 		GetSerializer: getWebSocketSerializer,
+		TryAcquireSlot: func() bool { return tryAcquire() },
+		ReleaseSlot:   releaseSlot,
 	}
 	if cfg.ServerAPIKey != "" {
 		server.CheckAuth = func(w http.ResponseWriter, r *http.Request) bool {
@@ -775,6 +859,27 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 		}
 	}
 
+	var sessionSem chan struct{}
+	if cfg.MaxConcurrentSessions > 0 {
+		sessionSem = make(chan struct{}, cfg.MaxConcurrentSessions)
+	}
+	tryAcquire := func() bool {
+		if sessionSem == nil {
+			return true
+		}
+		select {
+		case sessionSem <- struct{}{}:
+			return true
+		default:
+			return false
+		}
+	}
+	releaseSlot := func() {
+		if sessionSem != nil {
+			<-sessionSem
+		}
+	}
+
 	server := &ws.Server{
 		Host:           cfg.Host,
 		Port:           0,
@@ -785,8 +890,10 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 			}
 		},
 		RegisterHandlers: func(mux *http.ServeMux) {
-			registerHandlers(mux, cfg, ctx, onTransport, sessionStore)
+			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, tryAcquire, releaseSlot)
 		},
+		TryAcquireSlot: func() bool { return tryAcquire() },
+		ReleaseSlot:   releaseSlot,
 		GetSerializer: getWebSocketSerializer,
 	}
 	if cfg.ServerAPIKey != "" {

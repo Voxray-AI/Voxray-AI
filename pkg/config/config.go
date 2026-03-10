@@ -108,6 +108,11 @@ type Config struct {
 	// MCP configures the MCP (Model Context Protocol) client for tool integration. When set, tools from the MCP server are registered with the LLM.
 	MCP *MCPConfig `json:"mcp,omitempty"`
 
+	// MaxConcurrentSessions caps the number of concurrent voice sessions (WebSocket and WebRTC).
+	// When the limit is reached, new connections receive HTTP 503 Service Unavailable.
+	// Zero means no limit (default).
+	MaxConcurrentSessions int `json:"max_concurrent_sessions,omitempty"`
+
 	// MetricsEnabled toggles Prometheus metrics collection and exposure at /metrics.
 	// When omitted, metrics default to enabled to match README docs.
 	// When set explicitly to false, handlers avoid recording metrics and /metrics still exists but exports an empty registry.

@@ -1,4 +1,4 @@
-﻿package elevenlabs
+package elevenlabs
 
 import (
 	"bytes"
@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"voxray-go/pkg/config"
 	"voxray-go/pkg/frames"
+	"voxray-go/pkg/services/httpclient"
 )
 
 const (
@@ -40,10 +42,10 @@ func NewTTS(apiKey, voiceID, modelID, outputFormat string) *TTSService {
 		outputFormat = defaultOutputFmt
 	}
 	return &TTSService{
-		client:   http.DefaultClient,
-		apiKey:   apiKey,
-		voiceID:  voiceID,
-		modelID:  modelID,
+		client:    httpclient.Client(60 * time.Second),
+		apiKey:    apiKey,
+		voiceID:   voiceID,
+		modelID:   modelID,
 		outputFmt: outputFormat,
 	}
 }

@@ -64,6 +64,9 @@ func NewTransport(api *Client) *Transport {
 	}
 }
 
+// Done returns a channel that is closed when the transport is closed.
+func (t *Transport) Done() <-chan struct{} { return t.closed }
+
 // Input returns the channel of frames from incoming WhatsApp messages (e.g. text -> TextFrame/TranscriptionFrame).
 func (t *Transport) Input() <-chan frames.Frame { return t.inCh }
 

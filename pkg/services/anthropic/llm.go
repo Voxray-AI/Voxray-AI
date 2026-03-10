@@ -1,4 +1,4 @@
-﻿package anthropic
+package anthropic
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"voxray-go/pkg/frames"
+	"voxray-go/pkg/services/httpclient"
 )
 
 // DefaultLLMModel is the default Anthropic model when none is specified.
@@ -31,9 +32,7 @@ func NewLLMService(apiKey, model string) *Service {
 	return &Service{
 		apiKey: apiKey,
 		model:  model,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		client: httpclient.Client(60 * time.Second),
 	}
 }
 

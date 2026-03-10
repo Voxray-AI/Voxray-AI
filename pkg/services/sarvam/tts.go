@@ -1,4 +1,4 @@
-﻿// Package sarvam provides Sarvam AI TTS and STT service implementations.
+// Package sarvam provides Sarvam AI TTS and STT service implementations.
 package sarvam
 
 import (
@@ -14,6 +14,7 @@ import (
 	"voxray-go/pkg/config"
 	"voxray-go/pkg/frames"
 	"voxray-go/pkg/logger"
+	"voxray-go/pkg/services/httpclient"
 )
 
 // DefaultSarvamTTSModel is the default Sarvam TTS model (bulbul v2).
@@ -51,13 +52,11 @@ func NewTTS(apiKey, model, voice string) *SarvamTTSService {
 		voice = DefaultSarvamTTSSpeaker
 	}
 	return &SarvamTTSService{
-		apiKey:  apiKey,
-		baseURL: DefaultBaseURL,
-		model:   model,
-		voice:   voice,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		apiKey:     apiKey,
+		baseURL:    DefaultBaseURL,
+		model:      model,
+		voice:      voice,
+		httpClient: httpclient.Client(30 * time.Second),
 	}
 }
 

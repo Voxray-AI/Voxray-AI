@@ -1,4 +1,4 @@
-﻿package pipeline
+package pipeline
 
 import (
 	"context"
@@ -44,11 +44,19 @@ func (s *Source) Run(ctx context.Context) {
 	}
 }
 
+const sinkWriterQueueSize = 128
+
 // Sink is a processor that forwards all frames to a channel (for transport output).
+// When Setup(ctx) is called, a single writer goroutine runs so we do not spawn one
+// goroutine per frame (which can cause scheduler saturation at high TTS frame rates).
 type Sink struct {
 	*processors.BaseProcessor
 	Out     chan<- frames.Frame
 	ttsLogOnce sync.Once
+
+	// Single writer: ProcessFrame sends here; runWriter sends to Out.
+	sendCh    chan frames.Frame
+	writerDone chan struct{}
 }
 
 // NewSink returns a Sink that writes to ch.
@@ -57,6 +65,56 @@ func NewSink(name string, ch chan<- frames.Frame) *Sink {
 		name = "Sink"
 	}
 	return &Sink{BaseProcessor: processors.NewBaseProcessor(name), Out: ch}
+}
+
+// Setup starts the single writer goroutine. Must be called before ProcessFrame (pipeline does this).
+func (s *Sink) Setup(ctx context.Context) error {
+	if err := s.BaseProcessor.Setup(ctx); err != nil {
+		return err
+	}
+	if s.Out == nil {
+		return nil
+	}
+	s.sendCh = make(chan frames.Frame, sinkWriterQueueSize)
+	s.writerDone = make(chan struct{})
+	go s.runWriter(ctx)
+	return nil
+}
+
+// runWriter reads from sendCh and writes to Out. Exits when ctx is done or sendCh is closed.
+func (s *Sink) runWriter(ctx context.Context) {
+	defer close(s.writerDone)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case f, ok := <-s.sendCh:
+			if !ok {
+				return
+			}
+			func() {
+				defer func() { _ = recover() }()
+				select {
+				case s.Out <- f:
+				case <-ctx.Done():
+					return
+				}
+			}()
+		}
+	}
+}
+
+// Cleanup closes the send channel and waits for the writer to exit.
+func (s *Sink) Cleanup(ctx context.Context) error {
+	if s.sendCh != nil {
+		close(s.sendCh)
+		s.sendCh = nil
+		select {
+		case <-s.writerDone:
+		case <-ctx.Done():
+		}
+	}
+	return s.BaseProcessor.Cleanup(ctx)
 }
 
 // ProcessFrame forwards the frame to Out and does not call next (end of chain).
@@ -75,18 +133,21 @@ func (s *Sink) ProcessFrame(ctx context.Context, f frames.Frame, dir processors.
 		}
 	}
 	if s.Out != nil && f != nil {
-		// Send in a goroutine so the pipeline never blocks on a slow transport.
-		// This allows the runner's worker to keep processing queued mic input while TTS
-		// frames are still being sent to the client; order is preserved by the channel.
-		out := s.Out
-		frame := f
-		go func() {
-			defer func() { _ = recover() }() // avoid panic if channel closed during shutdown
+		if s.sendCh != nil {
 			select {
-			case out <- frame:
+			case s.sendCh <- f:
 			case <-ctx.Done():
 			}
-		}()
+		} else {
+			// Fallback when Setup was not called (e.g. some tests)
+			go func() {
+				defer func() { _ = recover() }()
+				select {
+				case s.Out <- f:
+				case <-ctx.Done():
+				}
+			}()
+		}
 	}
 	return nil
 }

@@ -17,9 +17,16 @@ type Store interface {
 	Close() error
 }
 
+const (
+	defaultMaxOpenConns    = 25
+	defaultMaxIdleConns    = 10
+	defaultConnMaxLifetime  = time.Hour
+)
+
 // SQLStore is a database/sql-backed transcript store.
 type SQLStore struct {
 	db     *sql.DB
+	stmt   *sql.Stmt
 	driver string
 	table  string
 }
@@ -49,42 +56,56 @@ func NewSQLStore(driver, dsn, table string) (*SQLStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("transcripts: ping db: %w", err)
 	}
+	db.SetMaxOpenConns(defaultMaxOpenConns)
+	db.SetMaxIdleConns(defaultMaxIdleConns)
+	db.SetConnMaxLifetime(defaultConnMaxLifetime)
+
+	var query string
+	switch driver {
+	case "postgres":
+		query = fmt.Sprintf("INSERT INTO %s (session_id, role, text, seq, created_at) VALUES ($1, $2, $3, $4, $5)", table)
+	default:
+		query = fmt.Sprintf("INSERT INTO %s (session_id, role, text, seq, created_at) VALUES (?, ?, ?, ?, ?)", table)
+	}
+	stmt, err := db.Prepare(query)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("transcripts: prepare: %w", err)
+	}
 	return &SQLStore{
 		db:     db,
+		stmt:   stmt,
 		driver: driver,
 		table:  table,
 	}, nil
 }
 
-// Close closes the underlying *sql.DB.
+// Close closes the prepared statement and the underlying *sql.DB.
 func (s *SQLStore) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil {
 		return nil
 	}
-	return s.db.Close()
+	if s.stmt != nil {
+		_ = s.stmt.Close()
+		s.stmt = nil
+	}
+	if s.db != nil {
+		return s.db.Close()
+	}
+	return nil
 }
 
 func (s *SQLStore) SaveMessage(ctx context.Context, sessionID, role, text string, at time.Time, seq int64) error {
-	// A nil store or missing DB indicates a programming/configuration error.
-	// Return an explicit error so callers can detect and surface it.
 	if s == nil {
 		return fmt.Errorf("transcripts: SaveMessage called on nil *SQLStore")
 	}
-	if s.db == nil {
-		return fmt.Errorf("transcripts: SaveMessage called with uninitialized *sql.DB")
+	if s.stmt == nil {
+		return fmt.Errorf("transcripts: SaveMessage called with uninitialized store")
 	}
 	if sessionID == "" || role == "" || text == "" {
 		return nil
 	}
-
-	var query string
-	switch s.driver {
-	case "postgres":
-		query = fmt.Sprintf("INSERT INTO %s (session_id, role, text, seq, created_at) VALUES ($1, $2, $3, $4, $5)", s.table)
-	default: // assume MySQL-compatible placeholders
-		query = fmt.Sprintf("INSERT INTO %s (session_id, role, text, seq, created_at) VALUES (?, ?, ?, ?, ?)", s.table)
-	}
-	_, err := s.db.ExecContext(ctx, query, sessionID, role, text, seq, at)
+	_, err := s.stmt.ExecContext(ctx, sessionID, role, text, seq, at)
 	if err != nil {
 		return fmt.Errorf("transcripts: insert message: %w", err)
 	}

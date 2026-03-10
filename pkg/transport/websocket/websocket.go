@@ -304,6 +304,11 @@ type Server struct {
 	CheckAuth func(http.ResponseWriter, *http.Request) bool
 	// GetSerializer if non-nil is called per request to choose the frame serializer (e.g. RTVI when query has rtvi=1).
 	GetSerializer func(r *http.Request) serialize.Serializer
+	// TryAcquireSlot if non-nil is called before upgrading to WebSocket. If it returns false, the handler responds 503 and returns.
+	// Used to enforce max concurrent sessions.
+	TryAcquireSlot func() bool
+	// ReleaseSlot if non-nil is called when a connection ends (after tr.Done() is closed). Call from a goroutine that waits on tr.Done().
+	ReleaseSlot func()
 }
 
 // ListenAndServe starts the HTTP server and blocks until ctx is canceled.
@@ -314,8 +319,17 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.CheckAuth != nil && !s.CheckAuth(w, r) {
 			return
 		}
+		if s.TryAcquireSlot != nil && !s.TryAcquireSlot() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"server at capacity"}`))
+			return
+		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
+			if s.ReleaseSlot != nil {
+				s.ReleaseSlot()
+			}
 			logger.Error("upgrade: %v", err)
 			return
 		}
@@ -326,6 +340,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			}
 		}
 		tr := NewConnTransport(conn, 64, 64, ser)
+		if s.ReleaseSlot != nil {
+			go func() {
+				<-tr.Done()
+				s.ReleaseSlot()
+			}()
+		}
 		// Start monitoring this connection for inactivity if a session timeout
 		// has been configured.
 		if s.SessionTimeout > 0 {
@@ -410,8 +430,17 @@ func (s *Server) ServeWithListener(ctx context.Context, listener net.Listener) e
 		if s.CheckAuth != nil && !s.CheckAuth(w, r) {
 			return
 		}
+		if s.TryAcquireSlot != nil && !s.TryAcquireSlot() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"server at capacity"}`))
+			return
+		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
+			if s.ReleaseSlot != nil {
+				s.ReleaseSlot()
+			}
 			logger.Error("upgrade: %v", err)
 			return
 		}
@@ -422,6 +451,12 @@ func (s *Server) ServeWithListener(ctx context.Context, listener net.Listener) e
 			}
 		}
 		tr := NewConnTransport(conn, 64, 64, ser)
+		if s.ReleaseSlot != nil {
+			go func() {
+				<-tr.Done()
+				s.ReleaseSlot()
+			}()
+		}
 		if s.SessionTimeout > 0 {
 			go s.monitorSession(ctx, tr, s.SessionTimeout)
 		}
