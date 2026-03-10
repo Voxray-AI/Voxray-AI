@@ -333,4 +333,4 @@ License: see repository.
 
 ## Contributing
 
-Contributions are welcome. Open an issue or pull request to get started.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, style, and pull request guidelines.
