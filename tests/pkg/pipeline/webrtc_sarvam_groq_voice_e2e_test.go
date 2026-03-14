@@ -1,4 +1,4 @@
-﻿package pipeline_test
+package pipeline_test
 
 import (
 	"bytes"
@@ -245,7 +245,7 @@ func TestWebRTCSignaling_SarvamGroq(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		_ = server.StartServers(ctx, cfg, onTransport)
+		_ = server.StartServers(ctx, cfg, onTransport, nil, nil, nil)
 		close(done)
 	}()
 	time.Sleep(1 * time.Second)

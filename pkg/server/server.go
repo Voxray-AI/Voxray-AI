@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,12 +24,57 @@ import (
 	"voxray-go/pkg/runner/daily"
 	"voxray-go/pkg/transport"
 	"voxray-go/pkg/transport/smallwebrtc"
+	"voxray-go/pkg/transcripts"
 	ws "voxray-go/pkg/transport/websocket"
 )
 
 // webrtcOfferResponse is the JSON body for successful POST /webrtc/offer responses.
 type webrtcOfferResponse struct {
 	Answer string `json:"answer"`
+}
+
+// SessionMeta holds metadata for a registered voice session.
+type SessionMeta struct {
+	SessionID string
+	CreatedAt time.Time
+}
+
+// SessionRegistry tracks active sessions (sessionID -> meta + cancel). Used by main to register/unregister on connection lifecycle.
+type SessionRegistry struct {
+	mu       sync.Mutex
+	sessions map[string]sessionEntry
+}
+
+type sessionEntry struct {
+	meta  SessionMeta
+	cancel func()
+}
+
+// NewSessionRegistry returns an empty session registry.
+func NewSessionRegistry() *SessionRegistry {
+	return &SessionRegistry{sessions: make(map[string]sessionEntry)}
+}
+
+// Register adds a session. cancel is invoked when the session ends (e.g. for cleanup).
+func (r *SessionRegistry) Register(sessionID string, meta SessionMeta, cancel func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sessions[sessionID] = sessionEntry{meta: meta, cancel: cancel}
+}
+
+// Unregister removes a session.
+func (r *SessionRegistry) Unregister(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.sessions, sessionID)
+}
+
+// PipelineStore holds pipeline state for API routes (e.g. future GET /sessions). For now a placeholder.
+type PipelineStore struct{}
+
+// NewPipelineStore returns a new pipeline store.
+func NewPipelineStore() *PipelineStore {
+	return &PipelineStore{}
 }
 
 // WebrtcOfferDoc documents the WebRTC offer HTTP endpoint for Swagger.
@@ -49,8 +95,9 @@ type webrtcOfferResponse struct {
 func WebrtcOfferDoc() {}
 
 // registerHandlers registers the web file server (when web/ exists), Swagger, runner /start and /sessions when WebRTC is enabled, and the WebRTC /webrtc/offer handler on mux.
+// sessionRegistry, pipelineStore, and transcriptFetcher are optional (may be nil); used by future routes (e.g. list sessions, fetch transcript).
 // JSON response write errors below are best-effort; the client may already be gone.
-func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore, tryAcquire func() bool, releaseSlot func()) {
+func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore, tryAcquire func() bool, releaseSlot func(), sessionRegistry *SessionRegistry, pipelineStore *PipelineStore, transcriptFetcher transcripts.Fetcher) {
 	// Health (liveness): always 200 when process is up
 	mux.Handle("/health", wrapWithMetrics(cfg, "health", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -110,7 +157,7 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 		if sessionStore == nil {
 			sessionStore = runner.NewMemorySessionStore()
 		}
-		registerRunnerWebRTCRoutes(mux, cfg, ctx, onTransport, sessionStore, tryAcquire, releaseSlot)
+		registerRunnerWebRTCRoutes(mux, cfg, ctx, onTransport, sessionStore, tryAcquire, releaseSlot, sessionRegistry, pipelineStore, transcriptFetcher)
 	}
 	if enableWebRTC {
 		mux.Handle("/webrtc/offer", wrapWithMetrics(cfg, "webrtc_offer", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +454,10 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 }
 
 // registerRunnerWebRTCRoutes adds POST /start and POST/PATCH /sessions/{id}/api/offer (runner-style).
-func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), store runner.SessionStore, tryAcquire func() bool, releaseSlot func()) {
+func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), store runner.SessionStore, tryAcquire func() bool, releaseSlot func(), sessionRegistry *SessionRegistry, pipelineStore *PipelineStore, transcriptFetcher transcripts.Fetcher) {
+	_ = sessionRegistry
+	_ = pipelineStore
+	_ = transcriptFetcher
 	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
 		setCORS(w, r, cfg.CORSAllowedOrigins, "POST, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -668,7 +718,8 @@ func buildSessionCap(cfg *config.Config) (tryAcquire func() bool, releaseSlot fu
 
 // StartServers starts the HTTP server (and optional WebRTC) and blocks until ctx is canceled.
 // The server runs until ctx is canceled.
-func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport)) error {
+// sessionRegistry, pipelineStore, and transcriptFetcher may be nil; they are passed to handlers for future routes (e.g. list sessions, fetch transcript).
+func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport), sessionRegistry *SessionRegistry, pipelineStore *PipelineStore, transcriptFetcher transcripts.Fetcher) error {
 	if cfg == nil {
 		return nil
 	}
@@ -708,7 +759,7 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 			}
 		},
 		RegisterHandlers: func(mux *http.ServeMux) {
-			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, tryAcquire, releaseSlot)
+			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, tryAcquire, releaseSlot, sessionRegistry, pipelineStore, transcriptFetcher)
 		},
 		GetSerializer: getWebSocketSerializer,
 		TryAcquireSlot: func() bool { return tryAcquire() },
@@ -736,7 +787,7 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 // The caller owns the listener and must close it when done.
 // Useful for tests that need a dynamic port.
 // If cfg is nil, returns nil without starting.
-func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport)) error {
+func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport), sessionRegistry *SessionRegistry, pipelineStore *PipelineStore, transcriptFetcher transcripts.Fetcher) error {
 	if cfg == nil {
 		return nil
 	}
@@ -770,7 +821,7 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 			}
 		},
 		RegisterHandlers: func(mux *http.ServeMux) {
-			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, tryAcquire, releaseSlot)
+			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, tryAcquire, releaseSlot, sessionRegistry, pipelineStore, transcriptFetcher)
 		},
 		TryAcquireSlot: func() bool { return tryAcquire() },
 		ReleaseSlot:   releaseSlot,

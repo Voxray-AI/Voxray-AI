@@ -11,10 +11,23 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// Message is a single transcript message (role, text, time, sequence).
+type Message struct {
+	Role      string
+	Text      string
+	CreatedAt time.Time
+	Seq       int64
+}
+
 // Store persists per-message transcripts for a session.
 type Store interface {
 	SaveMessage(ctx context.Context, sessionID, role, text string, at time.Time, seq int64) error
 	Close() error
+}
+
+// Fetcher can fetch transcript messages for a session.
+type Fetcher interface {
+	FetchMessages(ctx context.Context, sessionID string) ([]Message, error)
 }
 
 const (
@@ -110,5 +123,36 @@ func (s *SQLStore) SaveMessage(ctx context.Context, sessionID, role, text string
 		return fmt.Errorf("transcripts: insert message: %w", err)
 	}
 	return nil
+}
+
+// FetchMessages returns messages for the given session, ordered by seq.
+func (s *SQLStore) FetchMessages(ctx context.Context, sessionID string) ([]Message, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("transcripts: FetchMessages called on nil or uninitialized store")
+	}
+	var query string
+	switch s.driver {
+	case "postgres":
+		query = fmt.Sprintf("SELECT role, text, created_at, seq FROM %s WHERE session_id = $1 ORDER BY seq ASC", s.table)
+	default:
+		query = fmt.Sprintf("SELECT role, text, created_at, seq FROM %s WHERE session_id = ? ORDER BY seq ASC", s.table)
+	}
+	rows, err := s.db.QueryContext(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("transcripts: fetch messages: %w", err)
+	}
+	defer rows.Close()
+	var out []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.Role, &m.Text, &m.CreatedAt, &m.Seq); err != nil {
+			return nil, fmt.Errorf("transcripts: scan message: %w", err)
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("transcripts: iterate messages: %w", err)
+	}
+	return out, nil
 }
 

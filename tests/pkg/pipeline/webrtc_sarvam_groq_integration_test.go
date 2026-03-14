@@ -1,4 +1,4 @@
-﻿// Package pipeline_test contains integration tests for the voice pipeline.
+// Package pipeline_test contains integration tests for the voice pipeline.
 //
 // TestWebRTCSarvamGroqIntegration starts the real HTTP server with Sarvam STT/TTS and Groq LLM,
 // then uses a WebRTC client (pion) to send audio and assert that TTS audio is received.
@@ -179,7 +179,7 @@ func TestWebRTCSarvamGroqIntegration(t *testing.T) {
 	}
 
 	go func() {
-		_ = server.StartServersWithListener(ctx, listener, cfg, onTransport)
+		_ = server.StartServersWithListener(ctx, listener, cfg, onTransport, nil, nil, nil)
 	}()
 
 	// Give server a moment to be ready.

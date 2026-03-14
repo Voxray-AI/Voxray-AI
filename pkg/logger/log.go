@@ -2,6 +2,7 @@
 package logger
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -19,6 +20,27 @@ var (
 	// jsonLogs when true outputs one JSON object per line.
 	jsonLogs = false
 )
+
+// ConfigureFromConfig sets log level and format from string values (e.g. from config).
+// format is "json" for JSON lines, anything else (e.g. "text") for plain text.
+func ConfigureFromConfig(level, format string) {
+	Configure(level, format == "json")
+}
+
+// WithSession attaches sessionID to ctx. Use SessionFromContext to read it elsewhere.
+func WithSession(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, contextKeySessionID{}, sessionID)
+}
+
+// SessionFromContext returns the session ID from ctx if set via WithSession.
+func SessionFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(contextKeySessionID{}).(string); ok {
+		return id
+	}
+	return ""
+}
+
+type contextKeySessionID struct{}
 
 // Configure sets log level and JSON mode. Level is "debug", "info", or "error" (case-insensitive).
 // When json is true, each log line is a JSON object: {"level":"info","msg":"..."}.

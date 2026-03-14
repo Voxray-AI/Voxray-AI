@@ -368,6 +368,34 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 }
 
+// Validate checks config and returns a slice of error messages. Empty slice means valid.
+func Validate(cfg *Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	var errs []string
+	if cfg.Port < 0 {
+		errs = append(errs, "port must be >= 0")
+	}
+	return errs
+}
+
+// LogLevelOrDefault returns the log level, defaulting to "info" if unset.
+func (c *Config) LogLevelOrDefault() string {
+	if c == nil || c.LogLevel == "" {
+		return "info"
+	}
+	return c.LogLevel
+}
+
+// LogFormatOrDefault returns the log format: "json" if JSONLogs is true, otherwise "text".
+func (c *Config) LogFormatOrDefault() string {
+	if c != nil && c.JSONLogs {
+		return "json"
+	}
+	return "text"
+}
+
 // ValidateSessionCap checks session cap config and returns an error if invalid.
 // Call at server startup so invalid values (e.g. memory_percent 150 or 0.8) fail fast.
 func ValidateSessionCap(cfg *Config) error {
