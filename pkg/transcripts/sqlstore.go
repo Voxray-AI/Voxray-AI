@@ -17,6 +17,20 @@ type Store interface {
 	Close() error
 }
 
+// Message is a single transcript message returned by Fetcher.
+type Message struct {
+	SessionID string
+	Role      string
+	Text      string
+	At        time.Time
+	Seq       int64
+}
+
+// Fetcher retrieves transcript messages for a session.
+type Fetcher interface {
+	GetMessages(ctx context.Context, sessionID string) ([]Message, error)
+}
+
 // SQLStore is a database/sql-backed transcript store.
 type SQLStore struct {
 	db     *sql.DB
@@ -89,5 +103,39 @@ func (s *SQLStore) SaveMessage(ctx context.Context, sessionID, role, text string
 		return fmt.Errorf("transcripts: insert message: %w", err)
 	}
 	return nil
+}
+
+// GetMessages returns all transcript messages for the session, ordered by seq.
+// Implements Fetcher.
+func (s *SQLStore) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("transcripts: GetMessages called on nil or uninitialized *SQLStore")
+	}
+	var query string
+	switch s.driver {
+	case "postgres":
+		query = fmt.Sprintf("SELECT session_id, role, text, created_at, seq FROM %s WHERE session_id = $1 ORDER BY seq", s.table)
+	default:
+		query = fmt.Sprintf("SELECT session_id, role, text, created_at, seq FROM %s WHERE session_id = ? ORDER BY seq", s.table)
+	}
+	rows, err := s.db.QueryContext(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("transcripts: query messages: %w", err)
+	}
+	defer rows.Close()
+	var out []Message
+	for rows.Next() {
+		var m Message
+		var at time.Time
+		if err := rows.Scan(&m.SessionID, &m.Role, &m.Text, &at, &m.Seq); err != nil {
+			return nil, fmt.Errorf("transcripts: scan message: %w", err)
+		}
+		m.At = at
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("transcripts: iterate messages: %w", err)
+	}
+	return out, nil
 }
 

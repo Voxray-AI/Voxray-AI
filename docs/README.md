@@ -10,6 +10,7 @@ Documentation for the Voxray-Go real-time voice pipeline server.
 2. **[SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)** — System view, entry points, runner modes, and deployment diagram. Or **[CONNECTIVITY.md](CONNECTIVITY.md)** if you need “what can connect” (WebSocket, WebRTC, telephony) first.
 3. **As needed:** [DEPLOYMENT.md](DEPLOYMENT.md) (production), [EXTENSIONS.md](EXTENSIONS.md) (IVR, Voicemail), [FRAMEWORKS.md](FRAMEWORKS.md) (external chain, RTVI).
 4. **[WEBSOCKET_SERVICES.md](WEBSOCKET_SERVICES.md)** — For implementers: WebSocket service base (reconnection, backoff).
+5. **[skills/README.md](skills/README.md)** — Contributor onboarding: skills map and role-based reading order.
 
 ---
 
@@ -24,6 +25,7 @@ Documentation for the Voxray-Go real-time voice pipeline server.
 | [EXTENSIONS.md](EXTENSIONS.md) | IVR and Voicemail extensions (usage, pipeline order, frames, hooks) |
 | [FRAMEWORKS.md](FRAMEWORKS.md) | External chain (Langchain/Strands) and RTVI protocol |
 | [WEBSOCKET_SERVICES.md](WEBSOCKET_SERVICES.md) | WebSocket service base: reconnection, backoff (for implementers) |
+| [skills/README.md](skills/README.md) | Contributor onboarding: skills map and role-based reading order |
 
 ---
 

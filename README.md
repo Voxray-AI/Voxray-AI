@@ -314,6 +314,7 @@ Example `config.json` snippet for a simple voice agent:
 - [pkg/audio/README.md](pkg/audio/README.md) — VAD, turn detection, codecs, resample
 - [scripts/README.md](scripts/README.md) — build, run, and maintenance scripts
 - [docs/README.md](docs/README.md) — documentation index and reading order
+- [docs/skills/README.md](docs/skills/README.md) — skills map and reading order for new contributors
 
 ### Docs and examples
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,11 +26,82 @@ import (
 	ws "voxray-go/pkg/transport/websocket"
 	"voxray-go/pkg/frames/serialize"
 	rtvi "voxray-go/pkg/processors/frameworks/rtvi"
+	"voxray-go/pkg/transcripts"
 )
 
 // webrtcOfferResponse is the JSON body for successful POST /webrtc/offer responses.
 type webrtcOfferResponse struct {
 	Answer string `json:"answer"`
+}
+
+// SessionMeta holds metadata for a registered session.
+type SessionMeta struct {
+	SessionID string
+	CreatedAt time.Time
+}
+
+// sessionEntry holds session metadata and cancel for the registry.
+type sessionEntry struct {
+	meta   SessionMeta
+	cancel func()
+}
+
+// SessionRegistry is an in-memory registry of active sessions with optional cancel.
+type SessionRegistry struct {
+	mu   sync.RWMutex
+	sess map[string]sessionEntry
+}
+
+// NewSessionRegistry returns a new in-memory session registry.
+func NewSessionRegistry() *SessionRegistry {
+	return &SessionRegistry{sess: make(map[string]sessionEntry)}
+}
+
+// Register adds a session to the registry.
+func (r *SessionRegistry) Register(sessionID string, meta SessionMeta, cancel func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sess[sessionID] = sessionEntry{meta: meta, cancel: cancel}
+}
+
+// Unregister removes a session from the registry.
+func (r *SessionRegistry) Unregister(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.sess, sessionID)
+}
+
+// PipelineStore stores pipeline (or runner) references by session ID for API access.
+type PipelineStore struct {
+	mu sync.RWMutex
+	m  map[string]interface{}
+}
+
+// NewPipelineStore returns a new in-memory pipeline store.
+func NewPipelineStore() *PipelineStore {
+	return &PipelineStore{m: make(map[string]interface{})}
+}
+
+// Put stores a value for the session ID.
+func (s *PipelineStore) Put(sessionID string, value interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[sessionID] = value
+}
+
+// Get returns the value for the session ID, and true if found.
+func (s *PipelineStore) Get(sessionID string) (interface{}, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.m[sessionID]
+	return v, ok
+}
+
+// Delete removes the session ID from the store.
+func (s *PipelineStore) Delete(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, sessionID)
 }
 
 // WebrtcOfferDoc documents the WebRTC offer HTTP endpoint for Swagger.
@@ -212,7 +284,8 @@ func requireAPIKey(cfg *config.Config, w http.ResponseWriter, r *http.Request) b
 }
 
 // registerHandlers registers the web file server (when web/ exists), Swagger, runner /start and /sessions when WebRTC is enabled, and the WebRTC /webrtc/offer handler on mux.
-func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore) {
+// sessionRegistry, pipelineStore, and transcriptFetcher may be nil; they are passed through for future API routes.
+func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore, sessionRegistry *SessionRegistry, pipelineStore *PipelineStore, transcriptFetcher transcripts.Fetcher) {
 	// Health (liveness): always 200 when process is up
 	mux.Handle("/health", wrapWithMetrics(cfg, "health", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -693,9 +766,10 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 
 // StartServers starts the HTTP server that serves the WebSocket endpoint at /ws and, when transport is smallwebrtc or both, the WebRTC signaling endpoint at POST /webrtc/offer.
 // The onTransport callback is run in a new goroutine for each new connection.
+// sessionRegistry, pipelineStore, and transcriptFetcher are optional (may be nil) and passed to handlers for future API routes.
 // If cfg is nil, StartServers returns nil without starting anything.
 // The server runs until ctx is canceled.
-func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport)) error {
+func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport), sessionRegistry *SessionRegistry, pipelineStore *PipelineStore, transcriptFetcher transcripts.Fetcher) error {
 	if cfg == nil {
 		return nil
 	}
@@ -730,7 +804,7 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 			}
 		},
 		RegisterHandlers: func(mux *http.ServeMux) {
-			registerHandlers(mux, cfg, ctx, onTransport, sessionStore)
+			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, sessionRegistry, pipelineStore, transcriptFetcher)
 		},
 		GetSerializer: getWebSocketSerializer,
 	}
@@ -755,8 +829,9 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 // StartServersWithListener starts the same HTTP stack as StartServers but uses the provided listener (e.g. from net.Listen("tcp", ":0")).
 // The caller owns the listener and must close it when done.
 // Useful for tests that need a dynamic port.
+// sessionRegistry, pipelineStore, and transcriptFetcher may be nil.
 // If cfg is nil, returns nil without starting.
-func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport)) error {
+func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *config.Config, onTransport func(ctx context.Context, tr transport.Transport), sessionRegistry *SessionRegistry, pipelineStore *PipelineStore, transcriptFetcher transcripts.Fetcher) error {
 	if cfg == nil {
 		return nil
 	}
@@ -785,7 +860,7 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 			}
 		},
 		RegisterHandlers: func(mux *http.ServeMux) {
-			registerHandlers(mux, cfg, ctx, onTransport, sessionStore)
+			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, sessionRegistry, pipelineStore, transcriptFetcher)
 		},
 		GetSerializer: getWebSocketSerializer,
 	}

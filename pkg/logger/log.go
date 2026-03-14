@@ -2,12 +2,17 @@
 package logger
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 )
+
+type contextKey int
+
+const sessionIDKey contextKey = iota
 
 var (
 	// Default is the standard logger; Info and Debug write to it unless disabled.
@@ -34,6 +39,16 @@ func Configure(level string, json bool) {
 	}
 	DebugEnabled = logLevel == "debug"
 	jsonLogs = json
+}
+
+// ConfigureFromConfig sets log level and JSON mode from config-derived values.
+func ConfigureFromConfig(level string, useJSON bool) {
+	Configure(level, useJSON)
+}
+
+// WithSession returns a context with the session ID attached for logging or tracing.
+func WithSession(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionIDKey, sessionID)
 }
 
 // Info logs an informational message (unless level is "error").

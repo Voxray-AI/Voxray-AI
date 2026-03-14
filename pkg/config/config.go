@@ -232,6 +232,38 @@ func (c *Config) MetricsEnabledOrDefault() bool {
 	return *c.MetricsEnabled
 }
 
+// LogLevelOrDefault returns the configured log level, or "info" if unset.
+func (c *Config) LogLevelOrDefault() string {
+	if c == nil || c.LogLevel == "" {
+		return "info"
+	}
+	return strings.ToLower(strings.TrimSpace(c.LogLevel))
+}
+
+// LogFormatOrDefault returns whether JSON log format is enabled (from JSONLogs).
+func (c *Config) LogFormatOrDefault() bool {
+	if c == nil {
+		return false
+	}
+	return c.JSONLogs
+}
+
+// Validate checks the config and returns a slice of validation error messages.
+// Returns nil or empty slice when valid.
+func Validate(cfg *Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	var errs []string
+	if cfg.Transcripts.Enable && (cfg.Transcripts.Driver == "" || cfg.Transcripts.DSN == "") {
+		errs = append(errs, "transcripts enabled but driver or dsn missing")
+	}
+	if cfg.SessionStore == "redis" && cfg.RedisURL == "" {
+		errs = append(errs, "session_store is redis but redis_url is empty")
+	}
+	return errs
+}
+
 // LoadConfig reads a JSON configuration file from the specified path and returns a Config struct.
 // It returns an error if the file cannot be read or if the JSON format is invalid.
 // Call ApplyEnvOverrides(cfg) after LoadConfig to apply 12-factor env overrides.
