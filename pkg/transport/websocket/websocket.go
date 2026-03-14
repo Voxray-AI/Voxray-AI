@@ -64,9 +64,9 @@ type ConnTransport struct {
 	closed     chan struct{}
 	once       sync.Once
 
-	// WriteCoalesceMs when > 0 enables write coalescing: drain up to WriteCoalesceMaxFrames frames within this many ms before writing (reduces syscalls; adds latency).
-	WriteCoalesceMs     int
-	WriteCoalesceMaxFrames int
+	// writeCoalesceMs when > 0 enables write coalescing: drain up to writeCoalesceMaxFrames frames within this many ms before writing (reduces syscalls; adds latency). Set via ConnTransportOptions.
+	writeCoalesceMs     int
+	writeCoalesceMaxFrames int
 
 	// WriteMessageFunc, when non-nil, is used instead of conn.WriteMessage in writeOne (e.g. for tests to count or capture writes). When nil, conn.WriteMessage is used.
 	WriteMessageFunc func(messageType int, data []byte) error
@@ -112,9 +112,9 @@ func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serial
 		closed:     make(chan struct{}),
 	}
 	if opts != nil && opts.WriteCoalesceMs > 0 {
-		t.WriteCoalesceMs = opts.WriteCoalesceMs
+		t.writeCoalesceMs = opts.WriteCoalesceMs
 		if opts.WriteCoalesceMaxFrames > 0 {
-			t.WriteCoalesceMaxFrames = opts.WriteCoalesceMaxFrames
+			t.writeCoalesceMaxFrames = opts.WriteCoalesceMaxFrames
 		}
 	}
 	// Initialize last activity to now so that newly created transports
@@ -226,8 +226,8 @@ func (t *ConnTransport) writeLoop() {
 	if _, ok := t.serializer.(serialize.ProtobufSerializer); ok {
 		useBinaryDefault = true
 	}
-	coalesceMs := t.WriteCoalesceMs
-	maxFrames := t.WriteCoalesceMaxFrames
+	coalesceMs := t.writeCoalesceMs
+	maxFrames := t.writeCoalesceMaxFrames
 	if maxFrames <= 0 {
 		maxFrames = 10
 	}

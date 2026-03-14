@@ -127,12 +127,9 @@ func (r *Runner) Run(ctx context.Context) error {
 				}
 			}
 		}()
-		// Worker: queue -> pipeline. CONCURRENCY: allow drain on cancel without blocking on downstream processor; check ctx before each Push.
+		// Worker: queue -> pipeline. Check ctx before each Push so we exit promptly when cancelled; Push itself may still block until the pipeline drains.
 		go func() {
 			for f := range queueCh {
-				if ctx.Err() != nil {
-					return
-				}
 				select {
 				case <-ctx.Done():
 					return

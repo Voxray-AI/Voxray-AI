@@ -41,10 +41,13 @@ func TestNewCompositeObserver_Delegates(t *testing.T) {
 func TestObservingProcessor_NotifiesObserver(t *testing.T) {
 	var count int
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(2)
 	ob := &mockObserver{onProcessed: func() {
 		mu.Lock()
 		count++
 		mu.Unlock()
+		wg.Done()
 	}}
 	inner := filters.NewIdentityFilter("id")
 	wrap := observers.WrapWithObserver(inner, ob)
@@ -54,8 +57,13 @@ func TestObservingProcessor_NotifiesObserver(t *testing.T) {
 
 	wrap.ProcessFrame(ctx, frames.NewStartFrame(), processors.Downstream)
 	wrap.ProcessFrame(ctx, frames.NewTextFrame("hi"), processors.Downstream)
-	// ObservingProcessor notifies observer in a goroutine; allow it to run before asserting.
-	time.Sleep(50 * time.Millisecond)
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
 	mu.Lock()
 	n := count
 	mu.Unlock()
@@ -69,10 +77,13 @@ func TestObservingProcessor_AllFramesObservedNoneDropped(t *testing.T) {
 	const K = 10
 	var count int
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(K)
 	ob := &mockObserver{onProcessed: func() {
 		mu.Lock()
 		count++
 		mu.Unlock()
+		wg.Done()
 	}}
 	inner := filters.NewIdentityFilter("id")
 	wrap := observers.WrapWithObserver(inner, ob)
@@ -83,7 +94,13 @@ func TestObservingProcessor_AllFramesObservedNoneDropped(t *testing.T) {
 	for i := 0; i < K; i++ {
 		wrap.ProcessFrame(ctx, frames.NewTextFrame("x"), processors.Downstream)
 	}
-	time.Sleep(100 * time.Millisecond)
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
 	mu.Lock()
 	n := count
 	mu.Unlock()

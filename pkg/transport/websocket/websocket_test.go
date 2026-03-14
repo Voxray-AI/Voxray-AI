@@ -51,7 +51,6 @@ func TestWriteCoalescing_Disabled(t *testing.T) {
 		}
 		return nil
 	}
-	tr.WriteCoalesceMs = 0
 
 	if err := tr.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)

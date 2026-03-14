@@ -26,6 +26,7 @@ func Encoder(f frames.Frame) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Return a copy; json.Marshal may reuse internal buffers in future versions.
 	return append([]byte(nil), data...), nil
 }
 
