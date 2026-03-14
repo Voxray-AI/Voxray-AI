@@ -10,7 +10,7 @@ This section describes how Voxray is **built, tested, linted, monitored, and rel
   - **File**: `.github/workflows/go.yml`.
   - **Behavior**:
     - Triggers on pushes and pull requests to `main`.
-    - Uses `actions/setup-go` to install Go `1.20`, then runs `go build ./...` and `go test ./...`.
+    - Uses `actions/setup-go` to install Go `1.25`, then runs `go build ./...` and `go test ./...`.
   - **Notes**:
     - CI is intentionally simple: no matrix, coverage reporting, or lint step wired yet.
     - Release / deployment steps (Docker build/push, Helm, Terraform) are left to downstream infrastructure; there is no in‑repo CD pipeline.

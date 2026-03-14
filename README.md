@@ -22,6 +22,7 @@ Voxray-AI is the Go server (`voxray-go`) that runs configurable voice pipelines 
 - [Examples](#examples)
 - [Use cases](#use-cases)
 - [Roadmap](#roadmap)
+- [Contributor onboarding](#contributor-onboarding)
 - [Documentation](#documentation)
 - [License](#license)
 - [Contributing](#contributing)
@@ -311,6 +312,10 @@ Example `config.json` snippet for a simple voice agent:
 - Deeper observability, tracing, and debugging tools for real-time pipelines.
 - Additional starter templates and example agents for popular voice-agent scenarios.
 - Expanded documentation on scaling, deployment patterns, and production hardening.
+
+## Contributor onboarding
+
+- **[docs/skills/README.md](docs/skills/README.md)** — Skills map, reading order, and role-based onboarding for new contributors (Core Stack, AI/ML, Infrastructure, DevOps, Key Concepts, Concurrency).
 
 ## Documentation
 

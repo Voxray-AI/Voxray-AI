@@ -26,6 +26,9 @@ This `docs/skills` set is an **onboarding map** for new contributors: what you n
   - Architectural patterns, frames as a DSL, processors/observers, extensions (IVR, voicemail), MCP tools, and runtime flow (with a Mermaid diagram).
   - Read after you have a basic feel for the code; this is where the “mental model” of Voxray lives.
 
+- **6. Concurrency** — `docs/skills/CONCURRENCY.md`
+  - Goroutine topology, channel rules, mutex/atomic and worker-pool patterns. Read when touching runners, transports, sinks, or recording/observers.
+
 ---
 
 ### Onboarding Complexity Ratings
@@ -37,13 +40,14 @@ This `docs/skills` set is an **onboarding map** for new contributors: what you n
 | **3. Infrastructure** | `infrastructure.md` | **Medium** | Concepts (Docker, Redis, Postgres/MySQL, S3, TLS, CORS) are common, but weaving them into Voxray’s topology (runner modes, telephony, Daily) takes some study. |
 | **4. DevOps & Tooling** | `devops-tooling.md` | **Medium** | Tooling is conventional (Go, Make, GitHub Actions, Prometheus), but there are several layers of tests (stress, evals, frontend) and scripts to understand. |
 | **5. Key Concepts** | `key-concepts.md` | **High** | Requires synthesizing frames, processors, observers, extensions, and tools into a single mental model; most architectural changes depend on this understanding. |
+| **6. Concurrency** | `CONCURRENCY.md` | **High** | Subtle rules for goroutines, channels, and worker pools; mistakes cause leaks or stalls. |
 
 ---
 
 ### Role‑Based Onboarding Suggestions
 
 - **Pipeline / core server engineer**
-  - Read in order: **Core Stack → Key Concepts → AI/ML Stack → DevOps & Tooling → Infrastructure**.
+  - Read in order: **Core Stack → Key Concepts → Concurrency → AI/ML Stack → DevOps & Tooling → Infrastructure**.
   - Early tasks: add a simple processor, hook up a new metric, or extend an existing frame type.
 
 - **Provider / AI integrations engineer**
@@ -51,6 +55,6 @@ This `docs/skills` set is an **onboarding map** for new contributors: what you n
   - Early tasks: add or modify a provider adapter, update `config` examples, and add eval scenarios.
 
 - **Infra / SRE / platform engineer**
-  - Read in order: **Infrastructure → DevOps & Tooling → Core Stack → Key Concepts**.
+  - Read in order: **Infrastructure → DevOps & Tooling → Core Stack → Key Concepts**. Concurrency is useful for understanding session/worker behavior and admission control.
   - Early tasks: stand up a production‑like deployment (Docker or Kubernetes), configure metrics scraping, wire Redis/session store and transcripts DB, and configure session caps and observe `active_sessions` / `sessions_rejected_total`. 
 

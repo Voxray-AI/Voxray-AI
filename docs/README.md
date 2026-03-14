@@ -6,10 +6,11 @@ Documentation for the Voxray-Go real-time voice pipeline server.
 
 ## Reading order
 
-1. **[ARCHITECTURE.md](ARCHITECTURE.md)** — Start here for the component view (CLI → Server → Transport → Pipeline → Processors), data flow, and file layout.
-2. **[SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)** — System view, entry points, runner modes, and deployment diagram. Or **[CONNECTIVITY.md](CONNECTIVITY.md)** if you need “what can connect” (WebSocket, WebRTC, telephony) first.
-3. **As needed:** [DEPLOYMENT.md](DEPLOYMENT.md) (production), [EXTENSIONS.md](EXTENSIONS.md) (IVR, Voicemail), [FRAMEWORKS.md](FRAMEWORKS.md) (external chain, RTVI).
-4. **[WEBSOCKET_SERVICES.md](WEBSOCKET_SERVICES.md)** — For implementers: WebSocket service base (reconnection, backoff).
+1. **[skills/README.md](skills/README.md)** — Contributor onboarding: skills map, reading order (Core Stack, AI/ML, Infrastructure, DevOps, Key Concepts, Concurrency), and role-based suggestions.
+2. **[ARCHITECTURE.md](ARCHITECTURE.md)** — Start here for the component view (CLI → Server → Transport → Pipeline → Processors), data flow, and file layout.
+3. **[SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)** — System view, entry points, runner modes, and deployment diagram. Or **[CONNECTIVITY.md](CONNECTIVITY.md)** if you need “what can connect” (WebSocket, WebRTC, telephony) first.
+4. **As needed:** [DEPLOYMENT.md](DEPLOYMENT.md) (production), [EXTENSIONS.md](EXTENSIONS.md) (IVR, Voicemail), [FRAMEWORKS.md](FRAMEWORKS.md) (external chain, RTVI).
+5. **[WEBSOCKET_SERVICES.md](WEBSOCKET_SERVICES.md)** — For implementers: WebSocket service base (reconnection, backoff).
 
 ---
 
@@ -17,6 +18,7 @@ Documentation for the Voxray-Go real-time voice pipeline server.
 
 | Document | Description |
 |----------|-------------|
+| [skills/README.md](skills/README.md) | Contributor onboarding: skills map, reading order (Core Stack, AI/ML, Infrastructure, DevOps, Key Concepts, Concurrency), role-based suggestions |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Component view: CLI → Server → Transport → Pipeline → Processors; Mermaid diagrams; data flow; file layout |
 | [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) | System view: C4 context, entry points table, runner modes, deployment view, design decisions |
 | [CONNECTIVITY.md](CONNECTIVITY.md) | What can connect (WebSocket, WebRTC, telephony), wire formats, deployment choices |
