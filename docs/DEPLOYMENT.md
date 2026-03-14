@@ -10,7 +10,7 @@ After loading `config.json`, the following environment variables override config
 
 | Variable | Description |
 |----------|-------------|
-| `VOXRAY_CONFIG` | Config file path (default for `-config` flag). |
+| `VOXRAY_CONFIG` | Config file path used at startup (e.g. by main); not applied in `ApplyEnvOverrides`. |
 | `PORT` or `VOXRAY_PORT` | Server port (e.g. `8080`). |
 | `HOST` or `VOXRAY_HOST` | Bind address (e.g. `0.0.0.0` for all interfaces). |
 | `VOXRAY_LOG_LEVEL` | Log level: `debug`, `info`, `error`. |
@@ -20,11 +20,22 @@ After loading `config.json`, the following environment variables override config
 | `VOXRAY_TLS_KEY_FILE` | Path to TLS private key file. |
 | `VOXRAY_CORS_ORIGINS` | Comma-separated allowed origins (e.g. `https://app.example.com`). Empty or unset = no CORS Origin header. |
 | `VOXRAY_MAX_BODY_BYTES` | Max request body size in bytes for JSON endpoints (e.g. `1048576` for 1 MiB). |
+| `VOXRAY_SERVER_API_KEY` | When set, requires `Authorization: Bearer <key>` or `X-API-Key: <key>` for protected endpoints. |
 | `VOXRAY_PIPELINE_INPUT_QUEUE_CAP` | Buffer size between transport read and pipeline push (default 256). Larger values absorb bursts; full buffer back-pressures the transport. |
 | `VOXRAY_WS_WRITE_COALESCE_MS` | When > 0, WebSocket write coalescing: drain up to `VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES` frames within this many ms before writing (reduces syscalls; adds latency). 0 = disabled. |
 | `VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES` | Max frames to coalesce per write window when coalescing is enabled (e.g. 10). |
+| `VOXRAY_DAILY_DIALIN_WEBHOOK_SECRET` | Secret for validating `POST /daily-dialin-webhook` requests. |
+| `VOXRAY_RECORDING_ENABLE` | Set to `true` or `1` to enable recording uploads. |
+| `VOXRAY_RECORDING_BUCKET` | S3 bucket for recording uploads. |
+| `VOXRAY_RECORDING_BASE_PATH` | Key prefix within the bucket (e.g. `recordings/`). |
+| `VOXRAY_RECORDING_FORMAT` | File format/extension (e.g. `wav`). |
+| `VOXRAY_RECORDING_WORKER_COUNT` | Number of async upload worker goroutines. |
 | `VOXRAY_RECORDING_QUEUE_CAP` | Recording upload job queue capacity (default 32). Tune with worker count for S3 throughput. |
 | `VOXRAY_RECORDING_MAX_RETRIES` | Number of S3 upload retries with exponential backoff (default 3). |
+| `VOXRAY_TRANSCRIPTS_ENABLE` | Set to `true` or `1` to enable transcript logging. |
+| `VOXRAY_TRANSCRIPTS_DRIVER` | SQL driver (e.g. `postgres`, `mysql`). |
+| `VOXRAY_TRANSCRIPTS_DSN` | Data source name / connection string for transcript DB. |
+| `VOXRAY_TRANSCRIPTS_TABLE` | Table name for transcript rows (default `call_transcripts`). |
 | API keys | As in config: `OPENAI_API_KEY`, `DAILY_API_KEY`, etc., or via `api_keys` in config. Resolved keys are cached to avoid repeated env lookups. |
 
 ---

@@ -25,7 +25,7 @@ This section covers **where and how Voxray runs**, including deployment topology
 
 - **Configuration & 12‑factor overrides — Intermediate**
   - **Primary file**: `config.json` (often copied from `config.example.json`).
-  - **Loader**: `pkg/config.LoadConfig` parses JSON and then `ApplyEnvOverrides` applies environment variables such as `VOXRAY_PORT`, `VOXRAY_HOST`, `VOXRAY_LOG_LEVEL`, `VOXRAY_TLS_*`, `VOXRAY_RECORDING_*` (including `VOXRAY_RECORDING_QUEUE_CAP`, `VOXRAY_RECORDING_MAX_RETRIES`), `VOXRAY_TRANSCRIPTS_*`, `VOXRAY_CORS_ORIGINS`, `VOXRAY_PIPELINE_INPUT_QUEUE_CAP`, `VOXRAY_WS_WRITE_COALESCE_MS`, `VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES`, body‑size limits, and API keys. Resolved API keys are cached to avoid repeated env lookups.
+  - **Loader**: `pkg/config.LoadConfig` parses JSON and then `ApplyEnvOverrides` applies environment variables such as `VOXRAY_PORT`, `VOXRAY_HOST`, `VOXRAY_LOG_LEVEL`, `VOXRAY_TLS_*`, `VOXRAY_SERVER_API_KEY`, `VOXRAY_DAILY_DIALIN_WEBHOOK_SECRET`, `VOXRAY_RECORDING_*` (including `VOXRAY_RECORDING_QUEUE_CAP`, `VOXRAY_RECORDING_MAX_RETRIES`), `VOXRAY_TRANSCRIPTS_*`, `VOXRAY_CORS_ORIGINS`, `VOXRAY_PIPELINE_INPUT_QUEUE_CAP`, `VOXRAY_WS_WRITE_COALESCE_MS`, `VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES`, body‑size limits, and API keys. Resolved API keys are cached to avoid repeated env lookups.
   - **Skill implication**: Contributors adding new infra‑level options must:
     - Extend the `Config` struct with clear JSON tags.
     - Add safe defaults and environment overrides.
@@ -123,7 +123,7 @@ This section covers **where and how Voxray runs**, including deployment topology
 
 - **API keys & secrets management — Intermediate**
   - **Sources**:
-    - Environment variables (e.g. `OPENAI_API_KEY`, `GROQ_API_KEY`, `DAILY_API_KEY`) read via `cfg.GetAPIKey`.
+    - Environment variables (e.g. `OPENAI_API_KEY`, `GROQ_API_KEY`, `DAILY_API_KEY`) read via `cfg.GetAPIKey`; resolved values are cached.
     - `config.json` `api_keys` section for local development; not recommended for committing secrets.
   - **Usage**:
     - Provider adapters fetch keys at runtime and pass them to SDK clients or HTTP requests.
