@@ -1,4 +1,4 @@
-﻿// Package sarvam provides Sarvam AI TTS and STT service implementations.
+// Package sarvam provides Sarvam AI TTS and STT service implementations.
 package sarvam
 
 import (
@@ -51,13 +51,11 @@ func NewTTS(apiKey, model, voice string) *SarvamTTSService {
 		voice = DefaultSarvamTTSSpeaker
 	}
 	return &SarvamTTSService{
-		apiKey:  apiKey,
-		baseURL: DefaultBaseURL,
-		model:   model,
-		voice:   voice,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		apiKey:     apiKey,
+		baseURL:    DefaultBaseURL,
+		model:      model,
+		voice:      voice,
+		httpClient: &http.Client{Transport: sharedSarvamTransport, Timeout: 30 * time.Second},
 	}
 }
 
@@ -96,6 +94,7 @@ func (s *SarvamTTSService) Speak(ctx context.Context, text string, sampleRate in
 		return nil, err
 	}
 
+	// CONCURRENCY: context cancels in-flight provider request on session end.
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/text-to-speech", io.NopCloser(bytesReader(bodyBytes)))
 	if err != nil {
 		return nil, err

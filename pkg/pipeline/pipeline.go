@@ -1,4 +1,4 @@
-﻿// Package pipeline provides pipeline construction and execution.
+// Package pipeline provides pipeline construction and execution.
 package pipeline
 
 import (
@@ -12,6 +12,7 @@ import (
 
 // Pipeline holds a linear chain of processors and orchestrates the flow of frames through them.
 // It manages the lifecycle of processors (Setup/Cleanup) and provides methods to inject frames.
+// THREAD SAFETY: mu guards processors and startFrame; Push/PushUpstream may be called from multiple goroutines (e.g. runner worker and nested pipelines).
 type Pipeline struct {
 	mu         sync.Mutex
 	processors []processors.Processor

@@ -61,7 +61,7 @@ const (
 
 // Transport implements transport.Transport for WebRTC.
 // Input receives frames from the remote peer (e.g. decoded mic audio); Output sends frames to the remote peer (e.g. TTS).
-// One transport per peer connection. Close is idempotent; do not send on Output after Close.
+// THREAD SAFETY: handleInboundTrack and runOutbound are the only writers to inCh/outCh respectively; Close is idempotent; do not send on Output after Close.
 type Transport struct {
 	cfg              *Config
 	pc               *webrtc.PeerConnection
@@ -199,7 +199,7 @@ func (t *Transport) HandleOffer(offerSDP string) (answerSDP string, err error) {
 		}
 	})
 
-	// Start goroutine that reads TTS frames from outCh and sends over the outbound track.
+	// CONCURRENCY: single writer goroutine for outbound; only it sends on the track.
 	go t.runOutbound(outboundTrack)
 
 	// Wait for ICE candidate gathering so the answer SDP includes server candidates.
@@ -217,6 +217,7 @@ func (t *Transport) HandleOffer(offerSDP string) (answerSDP string, err error) {
 }
 
 // handleInboundTrack reads RTP from the remote track, decodes Opus to PCM 16 kHz, and pushes AudioRawFrame to inCh.
+// CONCURRENCY: single reader goroutine for this track; only it sends on inCh.
 func (t *Transport) handleInboundTrack(track *webrtc.TrackRemote) {
 	logger.Info("webrtc: inbound track started (reading mic RTP)")
 	decoder, err := newInboundOpusDecoder()
@@ -244,6 +245,7 @@ func (t *Transport) handleInboundTrack(track *webrtc.TrackRemote) {
 		if len(pkt.Payload) == 0 {
 			continue
 		}
+		// PERF: pre-built label set would avoid map alloc per packet at very high rates; consider caching WithLabelValues result at connection start.
 		metrics.WebRTCBytesReceivedTotal.WithLabelValues("ingress", "", "").Add(float64(len(pkt.Payload)))
 		rtpCount++
 		if firstRTP {

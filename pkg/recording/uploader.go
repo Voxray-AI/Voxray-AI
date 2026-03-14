@@ -23,28 +23,34 @@ type RecordingJob struct {
 }
 
 // Uploader uploads recordings to S3 using a fixed-size worker pool.
+// THREAD SAFETY: Enqueue may be called from any goroutine; workers are the only consumers of jobs; Shutdown must not be called concurrently with Enqueue.
 type Uploader struct {
-	client *s3.Client
-	jobs   chan RecordingJob
-	wg     sync.WaitGroup
+	client     *s3.Client
+	jobs       chan RecordingJob
+	wg         sync.WaitGroup
+	maxRetries int
 }
 
-// NewUploader creates a new uploader with the given worker count and queue size.
-// When workerCount <= 0, a default of 2 is used.
-func NewUploader(ctx context.Context, workerCount, queueSize int) (*Uploader, error) {
+// NewUploader creates a new uploader with the given worker count, queue size, and max retries (0 = default 3).
+// SCALING: one worker per ~N concurrent sessions uploading at once; tune for S3 bandwidth.
+func NewUploader(ctx context.Context, workerCount, queueSize, maxRetries int) (*Uploader, error) {
 	if workerCount <= 0 {
 		workerCount = 2
 	}
 	if queueSize <= 0 {
 		queueSize = 32
 	}
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
 	awsCfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load AWS config: %w", err)
 	}
 	u := &Uploader{
-		client: s3.NewFromConfig(awsCfg),
-		jobs:   make(chan RecordingJob, queueSize),
+		client:     s3.NewFromConfig(awsCfg),
+		jobs:       make(chan RecordingJob, queueSize),
+		maxRetries: maxRetries,
 	}
 	for i := 0; i < workerCount; i++ {
 		u.wg.Add(1)
@@ -104,16 +110,33 @@ func (u *Uploader) uploadOnce(ctx context.Context, job RecordingJob) error {
 	}
 	defer f.Close()
 
-	_, err = u.client.PutObject(ctx, &s3.PutObjectInput{
+	// MEMORY: stream file to S3 rather than buffering full WAV in heap.
+	input := &s3.PutObjectInput{
 		Bucket: aws.String(job.Bucket),
 		Key:    aws.String(job.Key),
 		Body:   f,
-	})
-	if err != nil {
-		return err
 	}
-	_ = os.Remove(job.LocalPath)
-	return nil
+	var lastErr error
+	backoff := 100 * time.Millisecond
+	for attempt := 0; attempt <= u.maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if _, err := f.Seek(0, 0); err != nil {
+				return err
+			}
+		}
+		_, lastErr = u.client.PutObject(ctx, input)
+		if lastErr == nil {
+			_ = os.Remove(job.LocalPath)
+			return nil
+		}
+	}
+	return lastErr
 }
 
 // BuildS3Key builds a key like "<basePath>/yyyy/mm/dd/<callID>.wav".

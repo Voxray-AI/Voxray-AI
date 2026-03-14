@@ -24,6 +24,7 @@ type TurnMetrics struct {
 }
 
 // Metrics holds simple counters and latencies for pipeline/processors.
+// THREAD SAFETY: mu guards all fields; safe for concurrent use from observer callbacks.
 type Metrics struct {
 	mu            sync.Mutex
 	InputLatency  time.Duration // time from input to first output

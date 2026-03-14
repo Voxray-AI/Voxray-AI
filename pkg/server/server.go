@@ -47,6 +47,7 @@ type sessionEntry struct {
 }
 
 // SessionRegistry is an in-memory registry of active sessions with optional cancel.
+// THREAD SAFETY: mu protects sess; Register/Unregister are single-writer per key; Get (via internal lookup) may run concurrently with other readers.
 type SessionRegistry struct {
 	mu   sync.RWMutex
 	sess map[string]sessionEntry
@@ -72,6 +73,7 @@ func (r *SessionRegistry) Unregister(sessionID string) {
 }
 
 // PipelineStore stores pipeline (or runner) references by session ID for API access.
+// THREAD SAFETY: mu protects m; Put/Delete are writers; Get is reader; safe for concurrent use from multiple goroutines.
 type PipelineStore struct {
 	mu sync.RWMutex
 	m  map[string]interface{}
@@ -504,7 +506,7 @@ func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context
 			logger.Error("telephony: no serializer for provider %s", data.Provider)
 			return
 		}
-		tr := ws.NewConnTransport(conn, 64, 64, ser)
+		tr := ws.NewConnTransport(conn, 64, 64, ser, nil)
 		if err := tr.Start(ctx); err != nil {
 			logger.Error("telephony transport start: %v", err)
 			return
@@ -806,7 +808,9 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 		RegisterHandlers: func(mux *http.ServeMux) {
 			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, sessionRegistry, pipelineStore, transcriptFetcher)
 		},
-		GetSerializer: getWebSocketSerializer,
+		GetSerializer:         getWebSocketSerializer,
+		WriteCoalesceMs:        cfg.WSWriteCoalesceMs,
+		WriteCoalesceMaxFrames: cfg.WSWriteCoalesceMaxFrames,
 	}
 	if cfg.ServerAPIKey != "" {
 		server.CheckAuth = func(w http.ResponseWriter, r *http.Request) bool {
@@ -862,7 +866,9 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 		RegisterHandlers: func(mux *http.ServeMux) {
 			registerHandlers(mux, cfg, ctx, onTransport, sessionStore, sessionRegistry, pipelineStore, transcriptFetcher)
 		},
-		GetSerializer: getWebSocketSerializer,
+		GetSerializer:         getWebSocketSerializer,
+		WriteCoalesceMs:        cfg.WSWriteCoalesceMs,
+		WriteCoalesceMaxFrames: cfg.WSWriteCoalesceMaxFrames,
 	}
 	if cfg.ServerAPIKey != "" {
 		server.CheckAuth = func(w http.ResponseWriter, r *http.Request) bool {

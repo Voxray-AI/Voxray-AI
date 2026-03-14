@@ -9,8 +9,8 @@ This section maps the concrete **languages, runtimes, and non‑AI libraries** u
 - **Go (1.25+) — Advanced**
   - **Role**: Primary language for the entire server (`cmd/voxray`, `pkg/**`, `tests/**`). All runtime behavior (pipelines, transports, providers, metrics, extensions) is implemented in Go.
   - **Key skills in this repo**:
-    - **Concurrency & goroutines**: One goroutine per connection (`pipeline.Runner` in `pkg/pipeline/runner.go`), background workers for queues and recording, and observer wrapping. Ability to reason about cancellation via `context.Context` and proper shutdown.
-    - **Channels & backpressure**: Use of buffered channels to decouple I/O from processing (e.g. `inputQueueCap` buffering between transport and pipeline) and understanding how this affects latency and throughput.
+    - **Concurrency & goroutines**: One goroutine per connection (`pipeline.Runner` in `pkg/pipeline/runner.go`), background workers for queues and recording, and observer wrapping. Runner uses a configurable buffered input queue and context-aware select so cancellation drains cleanly. Observers are notified asynchronously so the chain is not blocked. Ability to reason about cancellation via `context.Context` and proper shutdown.
+    - **Channels & backpressure**: Use of buffered channels to decouple I/O from processing. Pipeline input queue capacity is configurable (`pipeline_input_queue_cap`, default 256); when full, the transport reader blocks (back-pressure). Transport layer uses single reader/writer goroutines per connection; WebSocket supports optional write coalescing to reduce syscalls.
     - **Interfaces & composition**: Core abstractions are defined as interfaces (`Transport`, `Processor`, `SessionStore`, `LLMService`, `RealtimeService`, etc.), with many implementations wired via factory/registry patterns.
     - **Error handling**: Explicit error returns, wrapping (`fmt.Errorf("...: %w", err)`), and decisions about when to log vs. propagate vs. drop errors (e.g. in observers or best-effort logging paths).
     - **Testing**: Familiarity with `testing` and external test packages (`tests/pkg/**`), along with table-driven tests for providers, metrics, and frame handling.
@@ -156,7 +156,7 @@ This section maps the concrete **languages, runtimes, and non‑AI libraries** u
   - **Why Intermediate**: The data model is simple, but contributors must be careful about config validation and error propagation to avoid silent failures.
 
 - **AWS S3 (aws-sdk-go-v2/service/s3) — Intermediate**
-  - **Role**: Asynchronous upload of conversation recordings from local WAV files to S3 with a worker pool in `pkg/recording`.
+  - **Role**: Asynchronous upload of conversation recordings from local WAV files to S3 with a configurable worker pool and job queue in `pkg/recording`. Jobs reference temp file paths; workers stream to S3 (no full WAV in memory). Retries use exponential backoff up to `recording.max_retries`.
   - **Key skills**:
     - Understanding the job queue pattern (enqueue on session end, worker goroutines performing uploads) and metrics instrumentation for successes/failures.
     - Reasoning about eventual consistency and retry strategies for uploads.

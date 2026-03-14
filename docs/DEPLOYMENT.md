@@ -20,7 +20,12 @@ After loading `config.json`, the following environment variables override config
 | `VOXRAY_TLS_KEY_FILE` | Path to TLS private key file. |
 | `VOXRAY_CORS_ORIGINS` | Comma-separated allowed origins (e.g. `https://app.example.com`). Empty or unset = no CORS Origin header. |
 | `VOXRAY_MAX_BODY_BYTES` | Max request body size in bytes for JSON endpoints (e.g. `1048576` for 1 MiB). |
-| API keys | As in config: `OPENAI_API_KEY`, `DAILY_API_KEY`, etc., or via `api_keys` in config. |
+| `VOXRAY_PIPELINE_INPUT_QUEUE_CAP` | Buffer size between transport read and pipeline push (default 256). Larger values absorb bursts; full buffer back-pressures the transport. |
+| `VOXRAY_WS_WRITE_COALESCE_MS` | When > 0, WebSocket write coalescing: drain up to `VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES` frames within this many ms before writing (reduces syscalls; adds latency). 0 = disabled. |
+| `VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES` | Max frames to coalesce per write window when coalescing is enabled (e.g. 10). |
+| `VOXRAY_RECORDING_QUEUE_CAP` | Recording upload job queue capacity (default 32). Tune with worker count for S3 throughput. |
+| `VOXRAY_RECORDING_MAX_RETRIES` | Number of S3 upload retries with exponential backoff (default 3). |
+| API keys | As in config: `OPENAI_API_KEY`, `DAILY_API_KEY`, etc., or via `api_keys` in config. Resolved keys are cached to avoid repeated env lookups. |
 
 ---
 
@@ -52,6 +57,15 @@ readinessProbe:
 
 - **On-server TLS:** Set `tls_enable: true` and `tls_cert_file` / `tls_key_file` in config (or `VOXRAY_TLS_*` env). The server will use `ListenAndServeTLS`.
 - **Reverse proxy:** In production, TLS is often terminated at a reverse proxy (nginx, Ingress, load balancer). Run Voxray with TLS disabled and bind to `127.0.0.1` or a private network; expose the proxy publicly with HTTPS.
+
+---
+
+## Performance and scaling (tuning)
+
+- **Pipeline input queue**: `pipeline_input_queue_cap` (or `VOXRAY_PIPELINE_INPUT_QUEUE_CAP`) sets the buffer between transport read and pipeline push. When full, the reader blocks so the transport does not consume unbounded memory; default 256. Increase under very bursty input if needed.
+- **WebSocket write coalescing**: When `ws_write_coalesce_ms` > 0, the WebSocket writer drains multiple frames in a short window before writing, reducing syscalls at the cost of a small latency budget. Disabled by default (0).
+- **Recording**: `recording.queue_cap` and `recording.worker_count` control the upload job queue and worker pool; `recording.max_retries` enables exponential backoff on S3 failures. Uploads stream from temp files to S3 (no full WAV in memory). See [ARCHITECTURE.md](ARCHITECTURE.md) for concurrency notes.
+- **Metrics**: Prometheus metric names are stable for dashboards and alerts. Per-chunk metric sampling may be added in a future release.
 
 ---
 

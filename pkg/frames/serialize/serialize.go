@@ -1,4 +1,4 @@
-﻿// Package serialize provides JSON (and optional protobuf) encoding/decoding for frames.
+// Package serialize provides JSON (and optional protobuf) encoding/decoding for frames.
 package serialize
 
 import (
@@ -15,13 +15,19 @@ type Envelope struct {
 }
 
 // Encoder encodes a Frame to JSON with a type discriminator.
+// Wire format: no trailing newline; returned slice is a copy suitable for sending.
 func Encoder(f frames.Frame) ([]byte, error) {
 	payload, err := json.Marshal(f)
 	if err != nil {
 		return nil, err
 	}
-	env := Envelope{Type: f.FrameType(), Data: payload}
-	return json.Marshal(env)
+	env := Envelope{Type: f.FrameType(), Data: json.RawMessage(payload)}
+	data, err := json.Marshal(env)
+	if err != nil {
+		return nil, err
+	}
+	// Return a copy; json.Marshal may reuse internal buffers in future versions.
+	return append([]byte(nil), data...), nil
 }
 
 // Decoder decodes JSON (envelope format) into a Frame using the type field.

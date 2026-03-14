@@ -257,6 +257,7 @@ flowchart LR
 | **Session store** | SessionStore interface: in-memory (default, single instance) or Redis (shared across instances for horizontal scaling). Used by runner /start and /sessions; sessionId → Session (body, ICE options). Config: `session_store`, `redis_url`, `session_ttl_secs`. |
 | **Realtime service** | Optional RealtimeService (e.g. OpenAI Realtime API) for single-WebSocket voice; lives alongside LLM/STT/TTS in services. |
 | **Observers** | Metrics, turn tracking, and user–bot latency wrapped around processors for observability. |
+| **Performance tuning** | Configurable pipeline input queue (`pipeline_input_queue_cap`), WebSocket write coalescing (`ws_write_coalesce_ms`), recording queue/workers/retries (`recording.queue_cap`, `recording.max_retries`), and API key caching keep hot paths efficient and back-pressure explicit. See [ARCHITECTURE.md](ARCHITECTURE.md) §5.2 and [DEPLOYMENT.md](DEPLOYMENT.md). |
 
 ---
 

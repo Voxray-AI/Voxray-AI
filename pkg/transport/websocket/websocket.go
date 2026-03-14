@@ -55,7 +55,7 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 
 // ConnTransport handles a single WebSocket connection as a Voxray transport.
 // It exposes Input (frames from client) and Output (frames to client) and closes when the connection ends or Close is called.
-// Safe for multiple goroutines reading Input, writing to Output, or calling Done; Close is idempotent and must not be called concurrently with Send (sending on Output after Close may panic).
+// THREAD SAFETY: single reader goroutine (readLoop) and single writer goroutine (writeLoop); only they touch conn. Close is idempotent; do not send on Output after Close.
 type ConnTransport struct {
 	conn       *websocket.Conn
 	serializer serialize.Serializer
@@ -63,6 +63,13 @@ type ConnTransport struct {
 	outCh      chan frames.Frame
 	closed     chan struct{}
 	once       sync.Once
+
+	// writeCoalesceMs when > 0 enables write coalescing: drain up to writeCoalesceMaxFrames frames within this many ms before writing (reduces syscalls; adds latency). Set via ConnTransportOptions.
+	writeCoalesceMs     int
+	writeCoalesceMaxFrames int
+
+	// WriteMessageFunc, when non-nil, is used instead of conn.WriteMessage in writeOne (e.g. for tests to count or capture writes). When nil, conn.WriteMessage is used.
+	WriteMessageFunc func(messageType int, data []byte) error
 
 	// lastActivity holds the last time we saw activity on this connection
 	// (either a successfully read frame from the client or a successfully
@@ -73,10 +80,20 @@ type ConnTransport struct {
 // DefaultReadLimit is the maximum WebSocket message size in bytes (1MB). Prevents memory exhaustion from oversized frames.
 const DefaultReadLimit = 1 << 20
 
+// ConnTransportOptions optionally configures write coalescing when creating a ConnTransport.
+// Pass nil to NewConnTransport for default behaviour (no coalescing).
+type ConnTransportOptions struct {
+	// WriteCoalesceMs when > 0 enables write coalescing (drain up to WriteCoalesceMaxFrames within this many ms).
+	WriteCoalesceMs int
+	// WriteCoalesceMaxFrames is the max frames per coalesced batch; 0 means default 10.
+	WriteCoalesceMaxFrames int
+}
+
 // NewConnTransport builds a transport for an already-upgraded WebSocket connection.
 // If serializer is nil, JSON text messages are used. inBuf and outBuf set channel sizes; zero or negative values default to 64.
+// opts may be nil; when non-nil and WriteCoalesceMs > 0, coalescing is enabled so callers need not set fields after construction.
 // The caller must not use conn for reads or writes after passing it here.
-func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serialize.Serializer) *ConnTransport {
+func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serialize.Serializer, opts *ConnTransportOptions) *ConnTransport {
 	conn.SetReadLimit(DefaultReadLimit)
 	if inBuf <= 0 {
 		inBuf = 64
@@ -93,6 +110,12 @@ func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serial
 		inCh:       make(chan frames.Frame, inBuf),
 		outCh:      make(chan frames.Frame, outBuf),
 		closed:     make(chan struct{}),
+	}
+	if opts != nil && opts.WriteCoalesceMs > 0 {
+		t.writeCoalesceMs = opts.WriteCoalesceMs
+		if opts.WriteCoalesceMaxFrames > 0 {
+			t.writeCoalesceMaxFrames = opts.WriteCoalesceMaxFrames
+		}
 	}
 	// Initialize last activity to now so that newly created transports
 	// are considered active until we see the first message.
@@ -134,7 +157,7 @@ func (t *ConnTransport) Start(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("websocket: nil context passed to ConnTransport.Start")
 	}
-
+	// CONCURRENCY: single reader goroutine; single writer goroutine; only they touch conn.
 	go t.readLoop()
 	go t.writeLoop()
 	go func() {
@@ -203,7 +226,48 @@ func (t *ConnTransport) writeLoop() {
 	if _, ok := t.serializer.(serialize.ProtobufSerializer); ok {
 		useBinaryDefault = true
 	}
+	coalesceMs := t.writeCoalesceMs
+	maxFrames := t.writeCoalesceMaxFrames
+	if maxFrames <= 0 {
+		maxFrames = 10
+	}
 	for {
+		// PERF: coalescing reduces syscalls at the cost of added latency budget; when coalesceMs > 0, drain up to maxFrames within the window.
+		if coalesceMs > 0 {
+			select {
+			case <-t.closed:
+				return
+			case f, ok := <-t.outCh:
+				if !ok {
+					return
+				}
+				batch := []frames.Frame{f}
+				timer := time.NewTimer(time.Duration(coalesceMs) * time.Millisecond)
+			drainLoop:
+				for len(batch) < maxFrames {
+					select {
+					case <-t.closed:
+						timer.Stop()
+						return
+					case f, ok := <-t.outCh:
+						if !ok {
+							timer.Stop()
+							break drainLoop
+						}
+						batch = append(batch, f)
+					case <-timer.C:
+						break drainLoop
+					}
+				}
+				timer.Stop()
+				for _, fr := range batch {
+					if err := t.writeOne(fr, useBinaryDefault); err != nil {
+						return
+					}
+				}
+			}
+			continue
+		}
 		select {
 		case <-t.closed:
 			return
@@ -211,36 +275,47 @@ func (t *ConnTransport) writeLoop() {
 			if !ok {
 				return
 			}
-			var data []byte
-			var err error
-			msgType := websocket.TextMessage
-			if withType, ok := t.serializer.(serialize.SerializerWithMessageType); ok {
-				var binary bool
-				data, binary, err = withType.SerializeWithType(f)
-				if binary {
-					msgType = websocket.BinaryMessage
-				}
-			} else {
-				data, err = t.serializer.Serialize(f)
-				if useBinaryDefault {
-					msgType = websocket.BinaryMessage
-				}
-			}
-			if err != nil {
-				logger.Error("encode frame: %v", err)
-				continue
-			}
-			if data == nil {
-				// Serializer skipped this frame type (e.g. protobuf does not support it)
-				continue
-			}
-			if err := t.conn.WriteMessage(msgType, data); err != nil {
-				logger.Error("websocket write: %v", err)
+			if err := t.writeOne(f, useBinaryDefault); err != nil {
 				return
 			}
-			t.touch()
 		}
 	}
+}
+
+// writeOne serializes and writes a single frame. Returns non-nil error to stop the write loop.
+func (t *ConnTransport) writeOne(f frames.Frame, useBinaryDefault bool) error {
+	var data []byte
+	var err error
+	msgType := websocket.TextMessage
+	if withType, ok := t.serializer.(serialize.SerializerWithMessageType); ok {
+		var binary bool
+		data, binary, err = withType.SerializeWithType(f)
+		if binary {
+			msgType = websocket.BinaryMessage
+		}
+	} else {
+		data, err = t.serializer.Serialize(f)
+		if useBinaryDefault {
+			msgType = websocket.BinaryMessage
+		}
+	}
+	if err != nil {
+		logger.Error("encode frame: %v", err)
+		return nil
+	}
+	if data == nil {
+		return nil
+	}
+	write := t.WriteMessageFunc
+	if write == nil {
+		write = t.conn.WriteMessage
+	}
+	if err := write(msgType, data); err != nil {
+		logger.Error("websocket write: %v", err)
+		return err
+	}
+	t.touch()
+	return nil
 }
 
 // DefaultSessionTimeout is the default inactivity duration before the server closes a WebSocket.
@@ -304,6 +379,9 @@ type Server struct {
 	CheckAuth func(http.ResponseWriter, *http.Request) bool
 	// GetSerializer if non-nil is called per request to choose the frame serializer (e.g. RTVI when query has rtvi=1).
 	GetSerializer func(r *http.Request) serialize.Serializer
+	// WriteCoalesceMs when > 0 enables write coalescing on each ConnTransport (drain up to WriteCoalesceMaxFrames within this many ms).
+	WriteCoalesceMs     int
+	WriteCoalesceMaxFrames int
 }
 
 // ListenAndServe starts the HTTP server and blocks until ctx is canceled.
@@ -325,7 +403,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 				ser = custom
 			}
 		}
-		tr := NewConnTransport(conn, 64, 64, ser)
+		var opts *ConnTransportOptions
+		if s.WriteCoalesceMs > 0 {
+			opts = &ConnTransportOptions{WriteCoalesceMs: s.WriteCoalesceMs, WriteCoalesceMaxFrames: s.WriteCoalesceMaxFrames}
+		}
+		tr := NewConnTransport(conn, 64, 64, ser, opts)
 		// Start monitoring this connection for inactivity if a session timeout
 		// has been configured.
 		if s.SessionTimeout > 0 {
@@ -421,7 +503,11 @@ func (s *Server) ServeWithListener(ctx context.Context, listener net.Listener) e
 				ser = custom
 			}
 		}
-		tr := NewConnTransport(conn, 64, 64, ser)
+		var opts *ConnTransportOptions
+		if s.WriteCoalesceMs > 0 {
+			opts = &ConnTransportOptions{WriteCoalesceMs: s.WriteCoalesceMs, WriteCoalesceMaxFrames: s.WriteCoalesceMaxFrames}
+		}
+		tr := NewConnTransport(conn, 64, 64, ser, opts)
 		if s.SessionTimeout > 0 {
 			go s.monitorSession(ctx, tr, s.SessionTimeout)
 		}

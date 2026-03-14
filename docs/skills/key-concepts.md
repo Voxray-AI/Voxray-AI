@@ -29,9 +29,9 @@ At a high level, Voxray is **layered**:
 
 - **Runner (`pkg/pipeline/runner.go`)**
   - Bridges `Transport` and `Pipeline`:
-    - Starts the transport, pushes a `StartFrame`, and then forwards incoming frames via a buffered queue into `Pipeline.Push`.
+    - Starts the transport, pushes a `StartFrame`, and then forwards incoming frames via a **configurable buffered queue** (default 256) into `Pipeline.Push`; when full, the transport reader blocks (back-pressure). Worker and reader both honour context cancellation for clean shutdown.
     - Lets processors emit frames to `Transport.Output` via the sink.
-  - One `Runner` goroutine per connection; cancellation via `context.Context`.
+  - One `Runner` goroutine per connection; observer notifications run asynchronously so the chain is not blocked. See [ARCHITECTURE.md](../ARCHITECTURE.md) §5.2 for concurrency and performance details.
 
 - **Pipeline & processors (`pkg/pipeline`, `pkg/processors/**`)**
   - A `Pipeline` is a linear chain of `Processor`s; each processor sees a sequence of `Frame`s and can emit more frames downstream or upstream.

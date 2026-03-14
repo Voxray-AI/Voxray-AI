@@ -1,4 +1,4 @@
-﻿package voice
+package voice
 
 import (
 	"context"
@@ -225,7 +225,7 @@ func TestTurnProcessorUserStopAndIdleTimeout(t *testing.T) {
 	const stopTimeout = 0.1
 	const idleTimeout = 0.1
 
-	p := NewTurnProcessorWithUserTurn("turn", v, an, 16000, 1, false, stopTimeout, idleTimeout)
+	p := NewTurnProcessorWithUserTurn("turn", v, an, 16000, 1, false, stopTimeout, idleTimeout, 0)
 
 	col := &collectProcessor{}
 	p.SetNext(col)
@@ -292,7 +292,7 @@ func TestTurnProcessorBargeInEmitsUserStartedSpeakingWhenReSpeaking(t *testing.T
 	const stopTimeout = 1.0
 	const idleTimeout = 0.0
 
-	p := NewTurnProcessorWithUserTurn("turn", v, an, 16000, 1, false, stopTimeout, idleTimeout)
+	p := NewTurnProcessorWithUserTurn("turn", v, an, 16000, 1, false, stopTimeout, idleTimeout, 0)
 
 	col := &collectProcessor{}
 	p.SetNext(col)

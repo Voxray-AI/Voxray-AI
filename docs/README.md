@@ -18,10 +18,10 @@ Documentation for the Voxray-Go real-time voice pipeline server.
 
 | Document | Description |
 |----------|-------------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Component view: CLI → Server → Transport → Pipeline → Processors; Mermaid diagrams; data flow; file layout |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Component view: CLI → Server → Transport → Pipeline → Processors; concurrency and performance (§5.2); Mermaid diagrams; data flow; file layout |
 | [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) | System view: C4 context, entry points table, runner modes, deployment view, design decisions |
 | [CONNECTIVITY.md](CONNECTIVITY.md) | What can connect (WebSocket, WebRTC, telephony), wire formats, deployment choices |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | Production: env vars, health/ready, TLS, scaling, security, Docker |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Production: env vars, health/ready, TLS, performance tuning, scaling, security, Docker |
 | [EXTENSIONS.md](EXTENSIONS.md) | IVR and Voicemail extensions (usage, pipeline order, frames, hooks) |
 | [FRAMEWORKS.md](FRAMEWORKS.md) | External chain (Langchain/Strands) and RTVI protocol |
 | [WEBSOCKET_SERVICES.md](WEBSOCKET_SERVICES.md) | WebSocket service base: reconnection, backoff (for implementers) |

@@ -25,7 +25,7 @@ This section covers **where and how Voxray runs**, including deployment topology
 
 - **Configuration & 12‑factor overrides — Intermediate**
   - **Primary file**: `config.json` (often copied from `config.example.json`).
-  - **Loader**: `pkg/config.LoadConfig` parses JSON and then `ApplyEnvOverrides` applies environment variables such as `VOXRAY_PORT`, `VOXRAY_HOST`, `VOXRAY_LOG_LEVEL`, `VOXRAY_TLS_*`, `VOXRAY_RECORDING_*`, `VOXRAY_TRANSCRIPTS_*`, `VOXRAY_CORS_ORIGINS`, body‑size limits, and API keys.
+  - **Loader**: `pkg/config.LoadConfig` parses JSON and then `ApplyEnvOverrides` applies environment variables such as `VOXRAY_PORT`, `VOXRAY_HOST`, `VOXRAY_LOG_LEVEL`, `VOXRAY_TLS_*`, `VOXRAY_RECORDING_*` (including `VOXRAY_RECORDING_QUEUE_CAP`, `VOXRAY_RECORDING_MAX_RETRIES`), `VOXRAY_TRANSCRIPTS_*`, `VOXRAY_CORS_ORIGINS`, `VOXRAY_PIPELINE_INPUT_QUEUE_CAP`, `VOXRAY_WS_WRITE_COALESCE_MS`, `VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES`, body‑size limits, and API keys. Resolved API keys are cached to avoid repeated env lookups.
   - **Skill implication**: Contributors adding new infra‑level options must:
     - Extend the `Config` struct with clear JSON tags.
     - Add safe defaults and environment overrides.
@@ -61,11 +61,11 @@ This section covers **where and how Voxray runs**, including deployment topology
 
 - **S3 (recording storage) — Intermediate**
   - **Files**: `pkg/recording/*`, `pkg/config/config.go` (`RecordingConfig`), README recording section.
-  - **Role**: Asynchronous upload of **per‑session mixed audio** (WAV) to an S3 bucket using a worker pool.
+  - **Role**: Asynchronous upload of **per‑session mixed audio** (WAV) to an S3 bucket using a configurable worker pool and job queue.
   - **Behavior**:
-    - When `cfg.Recording.Enable` and `Bucket` are set, `run` creates a `recording.Uploader` with a worker count and job channel capacity.
+    - When `cfg.Recording.Enable` and `Bucket` are set, `run` creates a `recording.Uploader` with `recording.worker_count`, `recording.queue_cap` (default 32), and `recording.max_retries` (exponential backoff on S3 failure). Jobs hold temp file paths; workers stream from file to S3 (no full WAV in memory).
     - Each new session optionally creates a `ConversationRecorder` writing WAV audio to a temp file; on session end, a job is enqueued to upload to S3 with a key derived from base path, date, and session ID.
-    - Prometheus metrics record enqueued/success/failed jobs and queue depth.
+    - Prometheus metrics record enqueued/success/failed jobs and queue depth; failure metric is incremented only after all retries are exhausted.
   - **Skill implication**:
     - Understanding of **eventual consistency**: recording uploads may succeed after a session ends; errors are observable via metrics and logs, not via client responses.
     - Basic AWS knowledge (credentials and region resolution via standard SDK mechanisms).

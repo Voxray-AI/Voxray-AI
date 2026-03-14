@@ -1,4 +1,4 @@
-﻿// Package voicemail provides ClassificationProcessor for voicemail vs conversation detection.
+// Package voicemail provides ClassificationProcessor for voicemail vs conversation detection.
 package voicemail
 
 import (
@@ -28,6 +28,8 @@ type ClassificationProcessor struct {
 	voicemailDetected  bool
 	mu                 sync.Mutex
 
+	// voicemailDetectedNotify signals delayedVoicemailHandler when voicemail is detected (avoids polling sleep).
+	voicemailDetectedNotify chan struct{}
 	// voicemailEvent: when set (user started speaking) the delay timer resets; when clear we run the delay.
 	voicemailEvent   chan struct{}
 	voicemailEventMu sync.Mutex
@@ -45,12 +47,13 @@ func NewClassificationProcessor(name string, gateNotifier, conversationNotifier,
 		voicemailResponseDelaySecs = 2.0
 	}
 	return &ClassificationProcessor{
-		BaseProcessor:        processors.NewBaseProcessor(name),
-		gateNotifier:         gateNotifier,
-		conversationNotifier: conversationNotifier,
-		voicemailNotifier:    voicemailNotifier,
-		voicemailDelaySecs:   voicemailResponseDelaySecs,
-		voicemailEvent:       make(chan struct{}),
+		BaseProcessor:           processors.NewBaseProcessor(name),
+		gateNotifier:            gateNotifier,
+		conversationNotifier:    conversationNotifier,
+		voicemailNotifier:       voicemailNotifier,
+		voicemailDelaySecs:     voicemailResponseDelaySecs,
+		voicemailDetectedNotify: make(chan struct{}, 1),
+		voicemailEvent:          make(chan struct{}),
 	}
 }
 
@@ -110,8 +113,15 @@ func (p *ClassificationProcessor) delayedVoicemailHandler(ctx context.Context) {
 		vd := p.voicemailDetected
 		p.mu.Unlock()
 		if !vd {
-			time.Sleep(100 * time.Millisecond)
-			continue
+			// CONCURRENCY: wait for voicemail detection or 100ms instead of polling with Sleep.
+			select {
+			case <-ctx.Done():
+				return
+			case <-p.voicemailDetectedNotify:
+				// voicemailDetected was set, fall through
+			case <-time.After(100 * time.Millisecond):
+				continue
+			}
 		}
 		p.voicemailEventMu.Lock()
 		ch := p.voicemailEvent
@@ -219,6 +229,10 @@ func (p *ClassificationProcessor) processClassification(ctx context.Context, ful
 		p.decisionMade = true
 		p.voicemailDetected = true
 		p.mu.Unlock()
+		select {
+		case p.voicemailDetectedNotify <- struct{}{}:
+		default:
+		}
 		logger.Info("voicemail: VOICEMAIL detected")
 		p.gateNotifier.Notify()
 		p.voicemailNotifier.Notify()

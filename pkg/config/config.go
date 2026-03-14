@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type Config struct {
@@ -59,6 +60,8 @@ type Config struct {
 	VADStartSecsVAD float64 `json:"vad_start_secs_vad,omitempty"` // default 0.2
 	VADStopSecs     float64 `json:"vad_stop_secs,omitempty"`      // default 0.2
 	VADMinVolume    float64 `json:"vad_min_volume,omitempty"`     // default 0.6
+	// VADBatchSize batches consecutive VAD chunks before inference when > 1 (e.g. Silero); default 1 = no batching.
+	VADBatchSize int `json:"vad_batch_size,omitempty"`
 
 	// Interruption: allow user to interrupt bot; strategy (e.g. "keyword") and min_words for future use.
 	AllowInterruptions   bool   `json:"allow_interruptions,omitempty"`
@@ -86,6 +89,14 @@ type Config struct {
 	// SessionTTLSecs is the TTL for sessions in seconds (default 3600). Applies to Redis store; optional for memory store.
 	SessionTTLSecs int `json:"session_ttl_secs,omitempty"`
 
+	// PipelineInputQueueCap is the buffer size between transport read and pipeline push (default 256).
+	// When > 0, overrides the default. Back-pressure: when full, the reader blocks so the transport doesn't consume unbounded memory.
+	PipelineInputQueueCap int `json:"pipeline_input_queue_cap,omitempty"`
+
+	// WSWriteCoalesceMs when > 0 enables WebSocket write coalescing: drain up to WSWriteCoalesceMaxFrames frames within this many ms before writing (reduces syscalls; adds latency). Default 0 = disabled.
+	WSWriteCoalesceMs     int `json:"ws_write_coalesce_ms,omitempty"`
+	WSWriteCoalesceMaxFrames int `json:"ws_write_coalesce_max_frames,omitempty"`
+
 	// TLS: enable TLS and cert/key paths. Can be overridden by VOXRAY_TLS_* env vars.
 	TLSEnable   bool   `json:"tls_enable,omitempty"`
 	TLSCertFile string `json:"tls_cert_file,omitempty"`
@@ -112,12 +123,26 @@ type Config struct {
 	// When omitted, metrics default to enabled to match README docs.
 	// When set explicitly to false, handlers avoid recording metrics and /metrics still exists but exports an empty registry.
 	MetricsEnabled *bool `json:"metrics_enabled,omitempty"`
+	// Metrics holds optional tuning for metrics (e.g. audio sampling to reduce contention).
+	Metrics MetricsConfig `json:"metrics,omitempty"`
 
 	// Recording controls conversation-wide audio recording and async upload.
 	Recording RecordingConfig `json:"recording,omitempty"`
 
 	// Transcripts controls per-message transcript logging to an external database.
 	Transcripts TranscriptConfig `json:"transcripts,omitempty"`
+
+	// apiKeyCache caches GetAPIKey results so env/config is not scanned per call.
+	apiKeyCache struct {
+		mu   sync.RWMutex
+		keys map[string]string
+	}
+}
+
+// MetricsConfig holds optional metrics tuning.
+type MetricsConfig struct {
+	// Future: AudioSampleRate is reserved for per-chunk metric sampling (0..1). Not yet wired; do not document until a consumer exists.
+	AudioSampleRate float64 `json:"audio_sample_rate,omitempty"`
 }
 
 // RecordingConfig controls per-call/session audio recording.
@@ -132,6 +157,10 @@ type RecordingConfig struct {
 	Format string `json:"format,omitempty"`
 	// WorkerCount is the number of async uploader workers (thread pool size).
 	WorkerCount int `json:"worker_count,omitempty"`
+	// QueueCap is the job queue capacity (default 32). SCALING: tune for S3 bandwidth and concurrent sessions.
+	QueueCap int `json:"queue_cap,omitempty"`
+	// MaxRetries is the number of retries for S3 upload on failure (default 3); exponential backoff between attempts.
+	MaxRetries int `json:"max_retries,omitempty"`
 }
 
 // TranscriptConfig controls per-message transcript storage in a SQL database.
@@ -154,14 +183,38 @@ type MCPConfig struct {
 }
 
 // GetAPIKey returns the API key for the given service, checking the config first,
-// then falling back to environment variables.
+// then falling back to environment variables. Resolved values are cached so env lookups are not repeated.
 func (c *Config) GetAPIKey(service string, envVar string) string {
-	if c.APIKeys != nil {
-		if key, ok := c.APIKeys[service]; ok && key != "" {
-			return key
+	cacheKey := service + "\x00" + envVar
+	c.apiKeyCache.mu.RLock()
+	if c.apiKeyCache.keys != nil {
+		if v, ok := c.apiKeyCache.keys[cacheKey]; ok {
+			c.apiKeyCache.mu.RUnlock()
+			return v
 		}
 	}
-	return os.Getenv(envVar)
+	c.apiKeyCache.mu.RUnlock()
+
+	var key string
+	if c.APIKeys != nil {
+		if k, ok := c.APIKeys[service]; ok && k != "" {
+			key = k
+		}
+	}
+	if key == "" {
+		key = os.Getenv(envVar)
+	}
+
+	// don't cache empty — env may be set later (e.g. in tests)
+	if key != "" {
+		c.apiKeyCache.mu.Lock()
+		if c.apiKeyCache.keys == nil {
+			c.apiKeyCache.keys = make(map[string]string)
+		}
+		c.apiKeyCache.keys[cacheKey] = key
+		c.apiKeyCache.mu.Unlock()
+	}
+	return key
 }
 
 // STTProvider returns the provider to use for STT (stt_provider if set, else provider).
@@ -336,6 +389,26 @@ func ApplyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("VOXRAY_SERVER_API_KEY"); v != "" {
 		cfg.ServerAPIKey = v
 	}
+	if v := os.Getenv("VOXRAY_PIPELINE_INPUT_QUEUE_CAP"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.PipelineInputQueueCap = n
+		}
+	}
+	if v := os.Getenv("VOXRAY_WS_WRITE_COALESCE_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.WSWriteCoalesceMs = n
+		}
+	}
+	if v := os.Getenv("VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.WSWriteCoalesceMaxFrames = n
+		}
+	}
+	if v := os.Getenv("VOXRAY_VAD_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.VADBatchSize = n
+		}
+	}
 	if v := os.Getenv("VOXRAY_DAILY_DIALIN_WEBHOOK_SECRET"); v != "" {
 		cfg.DailyDialinWebhookSecret = v
 	}
@@ -354,6 +427,16 @@ func ApplyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("VOXRAY_RECORDING_WORKER_COUNT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			cfg.Recording.WorkerCount = n
+		}
+	}
+	if v := os.Getenv("VOXRAY_RECORDING_QUEUE_CAP"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Recording.QueueCap = n
+		}
+	}
+	if v := os.Getenv("VOXRAY_RECORDING_MAX_RETRIES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Recording.MaxRetries = n
 		}
 	}
 	if v := os.Getenv("VOXRAY_TRANSCRIPTS_ENABLE"); v != "" {

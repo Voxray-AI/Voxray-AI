@@ -1,4 +1,4 @@
-﻿package elevenlabs
+package elevenlabs
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"voxray-go/pkg/config"
 	"voxray-go/pkg/frames"
@@ -40,10 +41,10 @@ func NewTTS(apiKey, voiceID, modelID, outputFormat string) *TTSService {
 		outputFormat = defaultOutputFmt
 	}
 	return &TTSService{
-		client:   http.DefaultClient,
-		apiKey:   apiKey,
-		voiceID:  voiceID,
-		modelID:  modelID,
+		client:    &http.Client{Transport: sharedElevenlabsTransport, Timeout: 30 * time.Second},
+		apiKey:    apiKey,
+		voiceID:   voiceID,
+		modelID:   modelID,
 		outputFmt: outputFormat,
 	}
 }
@@ -64,6 +65,7 @@ func (s *TTSService) Speak(ctx context.Context, text string, sampleRate int) ([]
 		return nil, err
 	}
 	url := fmt.Sprintf("%s/text-to-speech/%s/stream?output_format=%s", elevenlabsAPIBase, s.voiceID, s.outputFmt)
+	// CONCURRENCY: context cancels in-flight provider request on session end.
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err

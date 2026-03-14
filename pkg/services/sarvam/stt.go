@@ -1,4 +1,4 @@
-﻿package sarvam
+package sarvam
 
 import (
 	"bytes"
@@ -18,6 +18,13 @@ import (
 // DefaultSarvamSTTModel is the default Sarvam STT model when none is specified.
 // It matches the REST API default (saarika:v2.5).
 const DefaultSarvamSTTModel = "saarika:v2.5"
+
+// sharedSarvamTransport is reused by STT and TTS clients to pool TCP connections.
+var sharedSarvamTransport = &http.Transport{
+	MaxIdleConnsPerHost: 10,
+	IdleConnTimeout:     90 * time.Second,
+	DisableCompression:  false,
+}
 
 // SarvamSTTService implements services.STTService (and STTStreamingService via TranscribeStream)
 // using Sarvam AI's speech-to-text REST API.
@@ -59,9 +66,7 @@ func NewSTTWithLanguage(apiKey, model, languageCode string) *SarvamSTTService {
 		baseURL:      DefaultBaseURL,
 		model:        model,
 		languageCode: languageCode,
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		httpClient:   &http.Client{Transport: sharedSarvamTransport, Timeout: 60 * time.Second},
 	}
 }
 
@@ -112,6 +117,7 @@ func (s *SarvamSTTService) Transcribe(ctx context.Context, audio []byte, sampleR
 		return nil, err
 	}
 
+	// CONCURRENCY: context cancels in-flight provider request on session end.
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/speech-to-text", &buf)
 	if err != nil {
 		return nil, err

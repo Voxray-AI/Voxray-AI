@@ -183,7 +183,7 @@ sequenceDiagram
 | **Entry** | `cmd/voxray` | Load config, register processors, start server, build pipeline per transport |
 | **Server** | `pkg/server` | HTTP server; WebSocket `/ws` and/or SmallWebRTC `/webrtc/offer`; runner-style `/start`, `/sessions/{id}/api/offer`; telephony POST `/` + `/telephony/ws`; Daily GET `/`, `/daily-dialin-webhook`; `onTransport` callback; `pkg/runner` SessionStore for runner sessions |
 | **Transport** | `pkg/transport`, `transport/websocket`, `transport/smallwebrtc`, `transport/memory`, `transport/whatsapp`; telephony via websocket + provider serializers | Bidirectional frame channels (Input/Output), Start/Close |
-| **Runner** | `pkg/pipeline` (Runner) | Connect transport to pipeline; forward input → Push; pipeline output → transport |
+| **Runner** | `pkg/pipeline` (Runner) | Connect transport to pipeline; buffered input queue (configurable cap) → Push; pipeline output → transport; context-aware drain on cancel |
 | **Pipeline** | `pkg/pipeline` (Pipeline) | Linear processor chain; Setup/Cleanup; Push(StartFrame), Push(frames) |
 | **Processors** | `pkg/processors`, `processors/voice`, `processors/echo`, `processors/aggregators/*` | Turn (VAD), STT, LLM, TTS, Sink; echo/logger/aggregator; aggregators (dtmf_aggregator, gated, llmfullresponse, llmtext, userresponse, gated_llm_context, llmcontextsummarizer) |
 | **Services** | `pkg/services`, `services/*` | LLM, STT, TTS provider implementations (OpenAI, Groq, Sarvam, AWS, …) |
@@ -239,6 +239,17 @@ Otherwise, the pipeline is built from **config.Plugins** (e.g. echo, logger, agg
 - **Daily:** `runner_transport=daily`. `GET /` creates a room and redirects to it; optional `POST /daily-dialin-webhook` for PSTN dial-in. Room clients use the same pipeline via WebRTC.
 
 See [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md) for the full system view and entry-point table.
+
+---
+
+### 5.2 Concurrency and performance
+
+- **Runner**: Transport input is fed into a **buffered queue** (capacity configurable via `pipeline_input_queue_cap`, default 256) before `Pipeline.Push`. When the queue is full, the reader blocks so the transport does not consume unbounded memory (back-pressure). The worker drains the queue and pushes frames into the pipeline; both reader and worker honour `context` cancellation so shutdown drains cleanly. See `pkg/pipeline/runner.go` (comments: `// CONCURRENCY:`, `// Back-pressure:`).
+- **Transport**: Each WebSocket `ConnTransport` has **exactly one reader goroutine** and **one writer goroutine**; they touch the connection only from those goroutines. SmallWebRTC uses one goroutine per inbound track and one for outbound. Optional **write coalescing** (config: `ws_write_coalesce_ms`, `ws_write_coalesce_max_frames`) batches small frames in a short time window to reduce syscalls. See `pkg/transport/websocket`, `pkg/transport/smallwebrtc`.
+- **Observers**: Observer notifications (metrics, turn tracking) run asynchronously so the processor chain is not blocked. Data frames still flow in order through the pipeline; observer notifications may complete in any order. Observers are documented as safe for concurrent invocation (e.g. metrics use a mutex).
+- **Recording**: Uploader uses a configurable worker pool and job queue (`recording.worker_count`, `recording.queue_cap`). Jobs reference temp file paths; workers stream from file to S3 (no full WAV in memory). S3 uploads retry with exponential backoff up to `recording.max_retries`.
+- **Config**: `GetAPIKey` and similar accessors cache resolved values so environment and config are not scanned on every call.
+- **Code comments**: Concurrency and performance decisions are tagged in code (`// CONCURRENCY:`, `// MEMORY:`, `// PERF:`, `// ORDERING:`, `// SCALING:`, `// THREAD SAFETY:`). See the plan and [DEPLOYMENT.md](DEPLOYMENT.md) for tuning options.
 
 ---
 

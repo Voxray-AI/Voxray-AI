@@ -8,10 +8,12 @@ import (
 	"voxray-go/pkg/logger"
 )
 
-// inputQueueCap is the buffer size between transport read and pipeline push.
+// inputQueueCapDefault is the default buffer size between transport read and pipeline push.
 // Decouples reading mic input from pipeline processing so that when the pipeline
 // is blocked (e.g. Sink writing TTS to transport), we still drain transport input.
-const inputQueueCap = 256
+// Back-pressure: when the buffer is full, the reader blocks on send so the transport read loop
+// doesn't consume unbounded memory; the worker may block on Push until the pipeline drains.
+const inputQueueCapDefault = 256
 
 // Transport is the minimal interface for runner: input frames from transport, output frames to transport.
 type Transport interface {
@@ -26,12 +28,15 @@ type Transport interface {
 }
 
 // Runner builds a pipeline from processors and runs it with a transport.
+// THREAD SAFETY: done and mu; Run is the only closer of done; Done() may be called from any goroutine.
 type Runner struct {
 	Pipeline   *Pipeline
 	Transport  Transport
 	StartFrame *frames.StartFrame // optional; if nil, NewStartFrame() is used in Run
-	done       chan struct{}
-	mu         sync.Mutex
+	// InputQueueCap overrides the default input queue capacity when > 0 (see inputQueueCapDefault).
+	InputQueueCap int
+	done          chan struct{}
+	mu            sync.Mutex
 }
 
 // NewRunner returns a Runner that will run the given pipeline with the transport.
@@ -82,9 +87,13 @@ func (r *Runner) Run(ctx context.Context) error {
 	// transport is never blocked by pipeline processing (e.g. Sink blocked on TTS output).
 	// Reader goroutine drains transport into queueCh; worker goroutine drains queueCh into pipeline.
 	if inCh != nil {
-		logger.Info("pipeline runner: input channel active, forwarding frames to pipeline (queue cap=%d)", inputQueueCap)
-		queueCh := make(chan frames.Frame, inputQueueCap)
-		// Reader: transport -> queue (never blocks on pipeline)
+		queueCap := inputQueueCapDefault
+		if r.InputQueueCap > 0 {
+			queueCap = r.InputQueueCap
+		}
+		logger.Info("pipeline runner: input channel active, forwarding frames to pipeline (queue cap=%d)", queueCap)
+		queueCh := make(chan frames.Frame, queueCap)
+		// CONCURRENCY: single reader goroutine; only it sends on queueCh; avoids blocking transport read on pipeline.
 		go func() {
 			var inCount uint64
 			for {
@@ -104,6 +113,7 @@ func (r *Runner) Run(ctx context.Context) error {
 					} else if inCount%25 == 0 {
 						logger.Info("pipeline runner: frames from transport so far: %d (latest type=%s)", inCount, f.FrameType())
 					}
+					// CONCURRENCY: avoid blocking on full queue when context is cancelled.
 					select {
 					case <-ctx.Done():
 						close(queueCh)
@@ -117,13 +127,15 @@ func (r *Runner) Run(ctx context.Context) error {
 				}
 			}
 		}()
-		// Worker: queue -> pipeline (may block; does not block reader)
+		// Worker: queue -> pipeline. Check ctx before each Push so we exit promptly when cancelled; Push itself may still block until the pipeline drains.
 		go func() {
 			for f := range queueCh {
-				if ctx.Err() != nil {
+				select {
+				case <-ctx.Done():
 					return
+				default:
+					_ = r.Pipeline.Push(ctx, f)
 				}
-				_ = r.Pipeline.Push(ctx, f)
 				if ef, ok := f.(*frames.ErrorFrame); ok && ef.Fatal {
 					return
 				}
