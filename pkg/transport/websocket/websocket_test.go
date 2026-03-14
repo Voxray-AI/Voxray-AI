@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,10 +39,16 @@ func TestWriteCoalescing_Disabled(t *testing.T) {
 	}
 	defer conn.Close()
 
-	tr := NewConnTransport(conn, 64, 64, nil)
+	tr := NewConnTransport(conn, 64, 64, nil, nil)
+	const N = 5
 	var writeCount int32
+	done := make(chan struct{})
+	var once sync.Once
 	tr.WriteMessageFunc = func(messageType int, data []byte) error {
-		atomic.AddInt32(&writeCount, 1)
+		n := atomic.AddInt32(&writeCount, 1)
+		if n == N {
+			once.Do(func() { close(done) })
+		}
 		return nil
 	}
 	tr.WriteCoalesceMs = 0
@@ -51,19 +58,23 @@ func TestWriteCoalescing_Disabled(t *testing.T) {
 	}
 	defer tr.Close()
 
-	const N = 5
 	for i := 0; i < N; i++ {
 		tr.Output() <- frames.NewTextFrame("x")
 	}
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for writes")
+	}
 	if n := atomic.LoadInt32(&writeCount); n != N {
 		t.Errorf("with coalescing disabled: expected %d writes, got %d", N, n)
 	}
 }
 
-// TestWriteCoalescing_Enabled verifies that when WriteCoalesceMs > 0, the coalescing path runs and all frames are written.
-// Current implementation still does one write per frame (batched drain only); we assert all N frames result in N writes and no panic.
-func TestWriteCoalescing_Enabled(t *testing.T) {
+// TestWriteCoalescing_Enabled_NoPanic is a smoke test: when WriteCoalesceMs > 0, the coalescing path runs,
+// all N frames are written (current implementation does one write per frame, batched drain only), and no panic.
+// If a future change batches multiple frames into a single WriteMessage, update this test to assert n < N.
+func TestWriteCoalescing_Enabled_NoPanic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -85,25 +96,32 @@ func TestWriteCoalescing_Enabled(t *testing.T) {
 	}
 	defer conn.Close()
 
-	tr := NewConnTransport(conn, 64, 64, nil)
+	tr := NewConnTransport(conn, 64, 64, nil, &ConnTransportOptions{WriteCoalesceMs: 10, WriteCoalesceMaxFrames: 10})
+	const N = 8
 	var writeCount int32
+	done := make(chan struct{})
+	var once sync.Once
 	tr.WriteMessageFunc = func(messageType int, data []byte) error {
-		atomic.AddInt32(&writeCount, 1)
+		n := atomic.AddInt32(&writeCount, 1)
+		if n == N {
+			once.Do(func() { close(done) })
+		}
 		return nil
 	}
-	tr.WriteCoalesceMs = 10
-	tr.WriteCoalesceMaxFrames = 10
 
 	if err := tr.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	defer tr.Close()
 
-	const N = 8
 	for i := 0; i < N; i++ {
 		tr.Output() <- frames.NewTextFrame("y")
 	}
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for writes")
+	}
 	if n := atomic.LoadInt32(&writeCount); n != N {
 		t.Errorf("with coalescing enabled: expected %d writes (one per frame), got %d", N, n)
 	}

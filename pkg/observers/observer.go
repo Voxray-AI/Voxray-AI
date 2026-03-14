@@ -70,13 +70,15 @@ type ObservingProcessor struct {
 }
 
 // ProcessFrame forwards to the inner processor and notifies the observer.
-// ORDERING: data frames still flow sequentially through Inner; observer notification is async and does not affect order.
+// ORDERING: observer is notified after Inner has run; it receives the same frame reference (post-process state).
+// Observers must not assume the frame is unmutated; if pre-process state is ever required, the contract would need to forbid in-place mutation or add a snapshot.
 func (o *ObservingProcessor) ProcessFrame(ctx context.Context, f frames.Frame, dir processors.Direction) error {
+	err := o.Inner.ProcessFrame(ctx, f, dir)
 	if o.Observer != nil {
-		name, frame, d := o.Inner.Name(), f, dir
-		go func() { o.Observer.OnFrameProcessed(name, frame, d) }()
+		name, observerFrame, d := o.Inner.Name(), f, dir
+		go func() { o.Observer.OnFrameProcessed(name, observerFrame, d) }()
 	}
-	return o.Inner.ProcessFrame(ctx, f, dir)
+	return err
 }
 
 func (o *ObservingProcessor) SetNext(p processors.Processor)   { o.Inner.SetNext(p) }
@@ -85,7 +87,7 @@ func (o *ObservingProcessor) Setup(ctx context.Context) error   { return o.Inner
 func (o *ObservingProcessor) Cleanup(ctx context.Context) error   { return o.Inner.Cleanup(ctx) }
 func (o *ObservingProcessor) Name() string { return o.Inner.Name() }
 
-// WrapWithObserver returns a processor that notifies observer then forwards to p.
+// WrapWithObserver returns a processor that forwards to p then notifies observer (after inner has run).
 func WrapWithObserver(p processors.Processor, observer Observer) processors.Processor {
 	if observer == nil {
 		return p

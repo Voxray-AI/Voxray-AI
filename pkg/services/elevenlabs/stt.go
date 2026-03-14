@@ -46,6 +46,13 @@ const (
 	defaultSTTModel  = "scribe_v1"
 )
 
+// sharedElevenlabsTransport is reused by STT and TTS clients to pool TCP connections.
+var sharedElevenlabsTransport = &http.Transport{
+	MaxIdleConnsPerHost: 10,
+	IdleConnTimeout:     90 * time.Second,
+	DisableCompression:  false,
+}
+
 // sttResponse is the JSON response from ElevenLabs speech-to-text convert endpoint.
 type sttResponse struct {
 	Text               string `json:"text"`
@@ -70,14 +77,8 @@ func NewSTT(apiKey, modelID string) *STTService {
 	if modelID == "" {
 		modelID = defaultSTTModel
 	}
-	// PERF: shared transport reuses TCP connections.
-	transport := &http.Transport{
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  false,
-	}
 	return &STTService{
-		client:  &http.Client{Transport: transport, Timeout: 60 * time.Second},
+		client:  &http.Client{Transport: sharedElevenlabsTransport, Timeout: 60 * time.Second},
 		apiKey:  apiKey,
 		modelID: modelID,
 	}

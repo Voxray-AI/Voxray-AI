@@ -40,14 +40,8 @@ func NewTTS(apiKey, voiceID, modelID, outputFormat string) *TTSService {
 	if outputFormat == "" {
 		outputFormat = defaultOutputFmt
 	}
-	// PERF: shared transport reuses TCP connections.
-	transport := &http.Transport{
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  false,
-	}
 	return &TTSService{
-		client:    &http.Client{Transport: transport, Timeout: 30 * time.Second},
+		client:    &http.Client{Transport: sharedElevenlabsTransport, Timeout: 30 * time.Second},
 		apiKey:    apiKey,
 		voiceID:   voiceID,
 		modelID:   modelID,

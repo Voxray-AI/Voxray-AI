@@ -80,10 +80,20 @@ type ConnTransport struct {
 // DefaultReadLimit is the maximum WebSocket message size in bytes (1MB). Prevents memory exhaustion from oversized frames.
 const DefaultReadLimit = 1 << 20
 
+// ConnTransportOptions optionally configures write coalescing when creating a ConnTransport.
+// Pass nil to NewConnTransport for default behaviour (no coalescing).
+type ConnTransportOptions struct {
+	// WriteCoalesceMs when > 0 enables write coalescing (drain up to WriteCoalesceMaxFrames within this many ms).
+	WriteCoalesceMs int
+	// WriteCoalesceMaxFrames is the max frames per coalesced batch; 0 means default 10.
+	WriteCoalesceMaxFrames int
+}
+
 // NewConnTransport builds a transport for an already-upgraded WebSocket connection.
 // If serializer is nil, JSON text messages are used. inBuf and outBuf set channel sizes; zero or negative values default to 64.
+// opts may be nil; when non-nil and WriteCoalesceMs > 0, coalescing is enabled so callers need not set fields after construction.
 // The caller must not use conn for reads or writes after passing it here.
-func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serialize.Serializer) *ConnTransport {
+func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serialize.Serializer, opts *ConnTransportOptions) *ConnTransport {
 	conn.SetReadLimit(DefaultReadLimit)
 	if inBuf <= 0 {
 		inBuf = 64
@@ -100,6 +110,12 @@ func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serial
 		inCh:       make(chan frames.Frame, inBuf),
 		outCh:      make(chan frames.Frame, outBuf),
 		closed:     make(chan struct{}),
+	}
+	if opts != nil && opts.WriteCoalesceMs > 0 {
+		t.WriteCoalesceMs = opts.WriteCoalesceMs
+		if opts.WriteCoalesceMaxFrames > 0 {
+			t.WriteCoalesceMaxFrames = opts.WriteCoalesceMaxFrames
+		}
 	}
 	// Initialize last activity to now so that newly created transports
 	// are considered active until we see the first message.
@@ -226,21 +242,24 @@ func (t *ConnTransport) writeLoop() {
 					return
 				}
 				batch := []frames.Frame{f}
-				deadline := time.Now().Add(time.Duration(coalesceMs) * time.Millisecond)
+				timer := time.NewTimer(time.Duration(coalesceMs) * time.Millisecond)
+			drainLoop:
 				for len(batch) < maxFrames {
 					select {
 					case <-t.closed:
+						timer.Stop()
 						return
 					case f, ok := <-t.outCh:
 						if !ok {
-							goto writeBatch
+							timer.Stop()
+							break drainLoop
 						}
 						batch = append(batch, f)
-					case <-time.After(time.Until(deadline)):
-						goto writeBatch
+					case <-timer.C:
+						break drainLoop
 					}
 				}
-			writeBatch:
+				timer.Stop()
 				for _, fr := range batch {
 					if err := t.writeOne(fr, useBinaryDefault); err != nil {
 						return
@@ -384,13 +403,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 				ser = custom
 			}
 		}
-		tr := NewConnTransport(conn, 64, 64, ser)
+		var opts *ConnTransportOptions
 		if s.WriteCoalesceMs > 0 {
-			tr.WriteCoalesceMs = s.WriteCoalesceMs
-			if s.WriteCoalesceMaxFrames > 0 {
-				tr.WriteCoalesceMaxFrames = s.WriteCoalesceMaxFrames
-			}
+			opts = &ConnTransportOptions{WriteCoalesceMs: s.WriteCoalesceMs, WriteCoalesceMaxFrames: s.WriteCoalesceMaxFrames}
 		}
+		tr := NewConnTransport(conn, 64, 64, ser, opts)
 		// Start monitoring this connection for inactivity if a session timeout
 		// has been configured.
 		if s.SessionTimeout > 0 {
@@ -486,13 +503,11 @@ func (s *Server) ServeWithListener(ctx context.Context, listener net.Listener) e
 				ser = custom
 			}
 		}
-		tr := NewConnTransport(conn, 64, 64, ser)
+		var opts *ConnTransportOptions
 		if s.WriteCoalesceMs > 0 {
-			tr.WriteCoalesceMs = s.WriteCoalesceMs
-			if s.WriteCoalesceMaxFrames > 0 {
-				tr.WriteCoalesceMaxFrames = s.WriteCoalesceMaxFrames
-			}
+			opts = &ConnTransportOptions{WriteCoalesceMs: s.WriteCoalesceMs, WriteCoalesceMaxFrames: s.WriteCoalesceMaxFrames}
 		}
+		tr := NewConnTransport(conn, 64, 64, ser, opts)
 		if s.SessionTimeout > 0 {
 			go s.monitorSession(ctx, tr, s.SessionTimeout)
 		}

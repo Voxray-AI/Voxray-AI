@@ -50,18 +50,12 @@ func NewTTS(apiKey, model, voice string) *SarvamTTSService {
 	if voice == "" {
 		voice = DefaultSarvamTTSSpeaker
 	}
-	// PERF: shared transport reuses TCP connections.
-	transport := &http.Transport{
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  false,
-	}
 	return &SarvamTTSService{
 		apiKey:     apiKey,
 		baseURL:    DefaultBaseURL,
 		model:      model,
 		voice:      voice,
-		httpClient: &http.Client{Transport: transport, Timeout: 30 * time.Second},
+		httpClient: &http.Client{Transport: sharedSarvamTransport, Timeout: 30 * time.Second},
 	}
 }
 

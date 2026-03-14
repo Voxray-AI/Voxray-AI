@@ -506,7 +506,7 @@ func registerTelephonyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context
 			logger.Error("telephony: no serializer for provider %s", data.Provider)
 			return
 		}
-		tr := ws.NewConnTransport(conn, 64, 64, ser)
+		tr := ws.NewConnTransport(conn, 64, 64, ser, nil)
 		if err := tr.Start(ctx); err != nil {
 			logger.Error("telephony transport start: %v", err)
 			return

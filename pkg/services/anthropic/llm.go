@@ -15,6 +15,13 @@ import (
 // DefaultLLMModel is the default Anthropic model when none is specified.
 const DefaultLLMModel = "claude-3-sonnet-20240229"
 
+// sharedAnthropicTransport is reused by all Anthropic clients to pool TCP connections.
+var sharedAnthropicTransport = &http.Transport{
+	MaxIdleConnsPerHost: 10,
+	IdleConnTimeout:     90 * time.Second,
+	DisableCompression:  false,
+}
+
 // Service implements a minimal Anthropic messages API client compatible with services.LLMService.
 type Service struct {
 	apiKey string
@@ -28,16 +35,10 @@ func NewLLMService(apiKey, model string) *Service {
 	if model == "" {
 		model = DefaultLLMModel
 	}
-	// PERF: shared transport reuses TCP connections.
-	transport := &http.Transport{
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  false,
-	}
 	return &Service{
 		apiKey: apiKey,
 		model:  model,
-		client: &http.Client{Transport: transport, Timeout: 60 * time.Second},
+		client: &http.Client{Transport: sharedAnthropicTransport, Timeout: 60 * time.Second},
 	}
 }
 

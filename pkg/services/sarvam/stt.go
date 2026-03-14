@@ -19,6 +19,13 @@ import (
 // It matches the REST API default (saarika:v2.5).
 const DefaultSarvamSTTModel = "saarika:v2.5"
 
+// sharedSarvamTransport is reused by STT and TTS clients to pool TCP connections.
+var sharedSarvamTransport = &http.Transport{
+	MaxIdleConnsPerHost: 10,
+	IdleConnTimeout:     90 * time.Second,
+	DisableCompression:  false,
+}
+
 // SarvamSTTService implements services.STTService (and STTStreamingService via TranscribeStream)
 // using Sarvam AI's speech-to-text REST API.
 //
@@ -54,18 +61,12 @@ func NewSTTWithLanguage(apiKey, model, languageCode string) *SarvamSTTService {
 	if model == "" {
 		model = DefaultSarvamSTTModel
 	}
-	// PERF: shared transport reuses TCP connections.
-	transport := &http.Transport{
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  false,
-	}
 	return &SarvamSTTService{
 		apiKey:       apiKey,
 		baseURL:      DefaultBaseURL,
 		model:        model,
 		languageCode: languageCode,
-		httpClient:   &http.Client{Transport: transport, Timeout: 60 * time.Second},
+		httpClient:   &http.Client{Transport: sharedSarvamTransport, Timeout: 60 * time.Second},
 	}
 }
 

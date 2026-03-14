@@ -14,25 +14,6 @@ import (
 	"voxray-go/pkg/processors"
 )
 
-// MEMORY: sync.Pool reuse for turn-completion audio copy buffers to reduce allocs in hot path.
-var turnBufferPool = sync.Pool{
-	New: func() interface{} { b := make([]byte, 0, 32768); return &b },
-}
-
-// getTurnBuffer returns a slice with at least need bytes, and a release func to return it to the pool.
-func getTurnBuffer(need int) (buf []byte, release func()) {
-	ptr := turnBufferPool.Get().(*[]byte)
-	if cap(*ptr) < need {
-		turnBufferPool.Put(ptr)
-		return make([]byte, need), func() {}
-	}
-	*ptr = (*ptr)[:need]
-	return *ptr, func() {
-		*ptr = (*ptr)[:0]
-		turnBufferPool.Put(ptr)
-	}
-}
-
 // TurnProcessor buffers AudioRawFrame chunks, runs VAD and turn detection, and forwards
 // concatenated audio downstream only when the turn is complete (end of speech).
 type TurnProcessor struct {
@@ -214,11 +195,8 @@ func (p *TurnProcessor) ProcessFrame(ctx context.Context, f frames.Frame, dir pr
 	if !p.useAsync {
 		if state == turn.Complete {
 			// Push accumulated audio as one AudioRawFrame for this turn
-			buf, release := getTurnBuffer(len(p.buffer))
-			copy(buf, p.buffer)
-			audioCopy := make([]byte, len(buf))
-			copy(audioCopy, buf)
-			release()
+			audioCopy := make([]byte, len(p.buffer))
+			copy(audioCopy, p.buffer)
 			out := frames.NewAudioRawFrame(audioCopy, p.SampleRate, p.Channels, 0)
 			p.buffer = p.buffer[:0]
 			p.Analyzer.Clear()
@@ -230,11 +208,8 @@ func (p *TurnProcessor) ProcessFrame(ctx context.Context, f frames.Frame, dir pr
 
 	// Async mode: allow synchronous Complete as a fast path.
 	if state == turn.Complete {
-		buf, release := getTurnBuffer(len(p.buffer))
-		copy(buf, p.buffer)
-		audioCopy := make([]byte, len(buf))
-		copy(audioCopy, buf)
-		release()
+		audioCopy := make([]byte, len(p.buffer))
+		copy(audioCopy, p.buffer)
 		out := frames.NewAudioRawFrame(audioCopy, p.SampleRate, p.Channels, 0)
 		p.buffer = p.buffer[:0]
 		p.Analyzer.Clear()
@@ -248,11 +223,8 @@ func (p *TurnProcessor) ProcessFrame(ctx context.Context, f frames.Frame, dir pr
 		select {
 		case res, ok := <-p.pendingResult:
 			if ok && res.Err == nil && res.State == turn.Complete {
-				buf, release := getTurnBuffer(len(p.buffer))
-				copy(buf, p.buffer)
-				audioCopy := make([]byte, len(buf))
-				copy(audioCopy, buf)
-				release()
+				audioCopy := make([]byte, len(p.buffer))
+				copy(audioCopy, p.buffer)
 				out := frames.NewAudioRawFrame(audioCopy, p.SampleRate, p.Channels, 0)
 				p.buffer = p.buffer[:0]
 				p.Analyzer.Clear()

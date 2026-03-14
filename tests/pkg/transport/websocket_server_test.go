@@ -1,4 +1,4 @@
-﻿package transport_test
+package transport_test
 
 import (
 	"context"
@@ -43,7 +43,7 @@ func TestWebsocketServer_StartAndEcho(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upgrade: %v", err)
 		}
-		tr := ws.NewConnTransport(conn, 64, 64, nil)
+		tr := ws.NewConnTransport(conn, 64, 64, nil, nil)
 		// Start the transport so that its read loop forwards frames into the
 		// Input channel used below.
 		if err := tr.Start(ctx); err != nil {
@@ -117,7 +117,7 @@ func TestWebsocketServer_ServerToClient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upgrade: %v", err)
 		}
-		tr = ws.NewConnTransport(conn, 64, 64, nil)
+		tr = ws.NewConnTransport(conn, 64, 64, nil, nil)
 		if err := tr.Start(ctx); err != nil {
 			t.Fatalf("start ConnTransport: %v", err)
 		}

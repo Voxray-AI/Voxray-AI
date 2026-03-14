@@ -185,7 +185,7 @@ type MCPConfig struct {
 // GetAPIKey returns the API key for the given service, checking the config first,
 // then falling back to environment variables. Resolved values are cached so env lookups are not repeated.
 func (c *Config) GetAPIKey(service string, envVar string) string {
-	cacheKey := service + ":" + envVar
+	cacheKey := service + "\x00" + envVar
 	c.apiKeyCache.mu.RLock()
 	if c.apiKeyCache.keys != nil {
 		if v, ok := c.apiKeyCache.keys[cacheKey]; ok {
@@ -205,12 +205,15 @@ func (c *Config) GetAPIKey(service string, envVar string) string {
 		key = os.Getenv(envVar)
 	}
 
-	c.apiKeyCache.mu.Lock()
-	if c.apiKeyCache.keys == nil {
-		c.apiKeyCache.keys = make(map[string]string)
+	// don't cache empty — env may be set later (e.g. in tests)
+	if key != "" {
+		c.apiKeyCache.mu.Lock()
+		if c.apiKeyCache.keys == nil {
+			c.apiKeyCache.keys = make(map[string]string)
+		}
+		c.apiKeyCache.keys[cacheKey] = key
+		c.apiKeyCache.mu.Unlock()
 	}
-	c.apiKeyCache.keys[cacheKey] = key
-	c.apiKeyCache.mu.Unlock()
 	return key
 }
 
@@ -399,6 +402,11 @@ func ApplyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.WSWriteCoalesceMaxFrames = n
+		}
+	}
+	if v := os.Getenv("VOXRAY_VAD_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.VADBatchSize = n
 		}
 	}
 	if v := os.Getenv("VOXRAY_DAILY_DIALIN_WEBHOOK_SECRET"); v != "" {
