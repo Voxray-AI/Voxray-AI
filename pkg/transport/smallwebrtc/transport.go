@@ -70,6 +70,7 @@ type Transport struct {
 	closed           chan struct{}
 	once             sync.Once
 	firstInboundLog  sync.Once
+	maxDurationOnce  sync.Once
 	inboundChunkCount uint64 // total audio chunks pushed to pipeline (for STT)
 	activeCounted    bool
 }
@@ -78,6 +79,19 @@ type Transport struct {
 // ICEServers is the list of STUN/TURN server URLs; if empty, a default STUN server is used.
 type Config struct {
 	ICEServers []string
+
+	// MaxDuration enforces a maximum lifetime for this RTC connection after the
+	// first inbound audio is observed (based on first successful Opus decode).
+	// 0 or negative disables the enforcement.
+	MaxDuration time.Duration
+
+	// OnMaxDurationTimeout is invoked once when MaxDuration elapses.
+	// It should cancel the per-connection session context to terminate the transport.
+	OnMaxDurationTimeout func()
+
+	// OnClosed is invoked (once) when Close() is called, typically used to cancel
+	// the per-connection session context even if the peer closes first.
+	OnClosed func()
 }
 
 // NewTransport creates a new WebRTC transport.
@@ -271,6 +285,8 @@ func (t *Transport) handleInboundTrack(track *webrtc.TrackRemote) {
 			logger.Info("webrtc: first Opus decode succeeded, buffering for pipeline")
 			firstDecode = false
 		}
+		// Start RTC max-duration enforcement after the first successful decode.
+		t.noteFirstInboundAudio()
 		resampled := audio.Resample16MonoAlloc(decoded, opusOutSampleRate, sttSampleRate)
 		pcmAccum = append(pcmAccum, resampled...)
 		if len(pcmAccum) >= 640 {
@@ -374,6 +390,30 @@ func (t *Transport) Close() error {
 		}
 		close(t.inCh)
 		close(t.outCh)
+		if t.cfg != nil && t.cfg.OnClosed != nil {
+			t.cfg.OnClosed()
+		}
 	})
 	return err
+}
+
+func (t *Transport) noteFirstInboundAudio() {
+	cfg := t.cfg
+	if cfg == nil || cfg.MaxDuration <= 0 || cfg.OnMaxDurationTimeout == nil {
+		return
+	}
+	t.maxDurationOnce.Do(func() {
+		dur := cfg.MaxDuration
+		cb := cfg.OnMaxDurationTimeout
+		time.AfterFunc(dur, func() {
+			select {
+			case <-t.closed:
+				return
+			default:
+			}
+			if cb != nil {
+				cb()
+			}
+		})
+	})
 }

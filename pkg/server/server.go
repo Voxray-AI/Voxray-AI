@@ -334,6 +334,10 @@ func requireAPIKey(cfg *config.Config, w http.ResponseWriter, r *http.Request) b
 // sessionRegistry, pipelineStore, and transcriptFetcher may be nil; they are passed through for future API routes.
 func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), sessionStore runner.SessionStore, sessionRegistry *SessionRegistry, pipelineStore *PipelineStore, transcriptFetcher transcripts.Fetcher) {
 	idempotencyStore := NewIdempotencyStore(24 * time.Hour)
+	rtcMaxDuration := time.Duration(0)
+	if cfg != nil && cfg.RTCMaxDurationSecs > 0 {
+		rtcMaxDuration = time.Duration(cfg.RTCMaxDurationSecs * float64(time.Second))
+	}
 
 	// Health (liveness): GET only, 200 with envelope. Served at legacy and /api/v1.
 	handleHealth := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -426,23 +430,29 @@ func registerHandlers(mux *http.ServeMux, cfg *config.Config, ctx context.Contex
 				return
 			}
 
+			connCtx, cancelConn := context.WithCancel(ctx)
 			tr := smallwebrtc.NewTransport(&smallwebrtc.Config{
 				ICEServers: cfg.WebRTCICEServers,
+				MaxDuration: rtcMaxDuration,
+				OnMaxDurationTimeout: cancelConn,
+				OnClosed: cancelConn,
 			})
 			answer, err := tr.HandleOffer(req.Offer)
 			if err != nil {
+				cancelConn()
 				logger.Error("smallwebrtc handle offer: %v", err)
 				api.RespondError(w, r, &api.APIError{StatusCode: http.StatusServiceUnavailable, Code: api.CodeServiceUnavailable, Message: "Service unavailable"})
 				return
 			}
-			if err := tr.Start(ctx); err != nil {
+			if err := tr.Start(connCtx); err != nil {
+				cancelConn()
 				logger.Error("smallwebrtc start: %v", err)
 				api.RespondError(w, r, &api.APIError{StatusCode: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "Internal server error"})
 				return
 			}
 
 			if onTransport != nil {
-				go onTransport(ctx, tr)
+				go onTransport(connCtx, tr)
 			}
 
 			api.RespondJSON(w, r, http.StatusOK, map[string]string{"answer": answer}, nil)
@@ -649,6 +659,11 @@ func registerDailyRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Con
 
 // registerRunnerWebRTCRoutes adds POST /start and POST/PATCH /sessions/{id}/api/offer (legacy) and /api/v1/sessions/{id}/offer (versioned).
 func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx context.Context, onTransport func(context.Context, transport.Transport), store runner.SessionStore, idempotencyStore *IdempotencyStore) {
+	rtcMaxDuration := time.Duration(0)
+	if cfg != nil && cfg.RTCMaxDurationSecs > 0 {
+		rtcMaxDuration = time.Duration(cfg.RTCMaxDurationSecs * float64(time.Second))
+	}
+
 	// BREAKING CHANGE: POST /start now returns 201 Created with envelope { data: { sessionId, iceConfig?, ... } }; supports Idempotency-Key.
 	// POST /start or /api/v1/start: create session.
 	handleStart := func(w http.ResponseWriter, r *http.Request) {
@@ -821,20 +836,28 @@ func registerRunnerWebRTCRoutes(mux *http.ServeMux, cfg *config.Config, ctx cont
 		if offerReq.RequestData == nil {
 			offerReq.RequestData = sess.Body
 		}
-		tr := smallwebrtc.NewTransport(&smallwebrtc.Config{ICEServers: cfg.WebRTCICEServers})
+		connCtx, cancelConn := context.WithCancel(ctx)
+		tr := smallwebrtc.NewTransport(&smallwebrtc.Config{
+			ICEServers: cfg.WebRTCICEServers,
+			MaxDuration: rtcMaxDuration,
+			OnMaxDurationTimeout: cancelConn,
+			OnClosed: cancelConn,
+		})
 		answer, err := tr.HandleOffer(offerReq.SDP)
 		if err != nil {
+			cancelConn()
 			logger.Error("sessions offer handle: %v", err)
 			api.RespondError(w, r, &api.APIError{StatusCode: http.StatusServiceUnavailable, Code: api.CodeServiceUnavailable, Message: "Service unavailable"})
 			return
 		}
-		if err := tr.Start(ctx); err != nil {
+		if err := tr.Start(connCtx); err != nil {
+			cancelConn()
 			logger.Error("sessions offer start: %v", err)
 			api.RespondError(w, r, &api.APIError{StatusCode: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "Internal server error"})
 			return
 		}
 		if onTransport != nil {
-			go onTransport(ctx, tr)
+			go onTransport(connCtx, tr)
 		}
 		api.RespondJSON(w, r, http.StatusOK, map[string]string{"answer": answer, "type": "answer"}, nil)
 	}
@@ -863,6 +886,10 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 	}
 	enableWebRTC := mode == "smallwebrtc" || mode == "both"
 	runnerMode := enableWebRTC || cfg.RunnerTransport == "daily"
+	rtcMaxDuration := time.Duration(0)
+	if cfg.RTCMaxDurationSecs > 0 {
+		rtcMaxDuration = time.Duration(cfg.RTCMaxDurationSecs * float64(time.Second))
+	}
 	var sessionStore runner.SessionStore
 	if runnerMode {
 		var err error
@@ -876,6 +903,7 @@ func StartServers(ctx context.Context, cfg *config.Config, onTransport func(ctx 
 		Host:           cfg.Host,
 		Port:           port,
 		SessionTimeout: ws.DefaultSessionTimeout,
+		MaxDurationAfterFirstAudio: rtcMaxDuration,
 		OnConn: func(c context.Context, tr *ws.ConnTransport) {
 			if onTransport != nil {
 				onTransport(c, tr)
@@ -921,6 +949,10 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 	}
 	enableWebRTC := mode == "smallwebrtc" || mode == "both"
 	runnerMode := enableWebRTC || cfg.RunnerTransport == "daily"
+	rtcMaxDuration := time.Duration(0)
+	if cfg.RTCMaxDurationSecs > 0 {
+		rtcMaxDuration = time.Duration(cfg.RTCMaxDurationSecs * float64(time.Second))
+	}
 	var sessionStore runner.SessionStore
 	if runnerMode {
 		var err error
@@ -934,6 +966,7 @@ func StartServersWithListener(ctx context.Context, listener net.Listener, cfg *c
 		Host:           cfg.Host,
 		Port:           0,
 		SessionTimeout: ws.DefaultSessionTimeout,
+		MaxDurationAfterFirstAudio: rtcMaxDuration,
 		OnConn: func(c context.Context, tr *ws.ConnTransport) {
 			if onTransport != nil {
 				onTransport(c, tr)

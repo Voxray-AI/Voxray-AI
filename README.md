@@ -307,6 +307,7 @@ Set the config path via the `-config` flag or the `VOXRAY_CONFIG` environment va
 | `api_keys` | object | — | Map of provider → API key |
 | `metrics_enabled` | bool | `true` | Expose Prometheus `/metrics` |
 | `webrtc_ice_servers` | array | — | ICE server config for WebRTC |
+| `rtc_max_duration_secs` | float | `0` | Max lifetime for RTC/WebSocket voice sessions after first inbound audio; `0` disables |
 | `recording` | object | — | S3 conversation recording (see below) |
 | `transcripts` | object | — | Database transcript logging (see below) |
 | `mcp` | object | — | MCP server: `command`, `args`, `tools_filter` (see [pkg/config/README.md](pkg/config/README.md)) |

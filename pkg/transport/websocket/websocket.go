@@ -76,6 +76,11 @@ type ConnTransport struct {
 	// (either a successfully read frame from the client or a successfully
 	// written frame to the client), stored as Unix nano time.
 	lastActivity atomic.Int64
+
+	// Max-duration enforcement (optional).
+	maxDurationAfterFirstAudio time.Duration
+	onMaxDurationTimeout       func()
+	maxDurationOnce            sync.Once
 }
 
 // DefaultReadLimit is the maximum WebSocket message size in bytes (1MB). Prevents memory exhaustion from oversized frames.
@@ -88,6 +93,12 @@ type ConnTransportOptions struct {
 	WriteCoalesceMs int
 	// WriteCoalesceMaxFrames is the max frames per coalesced batch; 0 means default 10.
 	WriteCoalesceMaxFrames int
+
+	// MaxDurationAfterFirstAudio when > 0 starts a one-shot timer on the
+	// first inbound *frames.AudioRawFrame and invokes OnMaxDurationTimeout
+	// when the duration elapses.
+	MaxDurationAfterFirstAudio time.Duration
+	OnMaxDurationTimeout       func()
 }
 
 // NewConnTransport builds a transport for an already-upgraded WebSocket connection.
@@ -112,11 +123,16 @@ func NewConnTransport(conn *websocket.Conn, inBuf, outBuf int, serializer serial
 		outCh:      make(chan frames.Frame, outBuf),
 		closed:     make(chan struct{}),
 	}
-	if opts != nil && opts.WriteCoalesceMs > 0 {
-		t.writeCoalesceMs = opts.WriteCoalesceMs
-		if opts.WriteCoalesceMaxFrames > 0 {
-			t.writeCoalesceMaxFrames = opts.WriteCoalesceMaxFrames
+
+	if opts != nil {
+		if opts.WriteCoalesceMs > 0 {
+			t.writeCoalesceMs = opts.WriteCoalesceMs
+			if opts.WriteCoalesceMaxFrames > 0 {
+				t.writeCoalesceMaxFrames = opts.WriteCoalesceMaxFrames
+			}
 		}
+		t.maxDurationAfterFirstAudio = opts.MaxDurationAfterFirstAudio
+		t.onMaxDurationTimeout = opts.OnMaxDurationTimeout
 	}
 	// Initialize last activity to now so that newly created transports
 	// are considered active until we see the first message.
@@ -206,6 +222,9 @@ func (t *ConnTransport) readLoop() {
 			t.touch()
 			continue
 		}
+
+		t.maybeStartMaxDuration(f)
+
 		// Optional: notify serializer of StartFrame for sample rate etc.
 		if setup, ok := t.serializer.(serialize.SerializerWithSetup); ok {
 			if start, ok := f.(*frames.StartFrame); ok {
@@ -219,6 +238,31 @@ func (t *ConnTransport) readLoop() {
 		case t.inCh <- f:
 		}
 	}
+}
+
+func (t *ConnTransport) maybeStartMaxDuration(f frames.Frame) {
+	if t.maxDurationAfterFirstAudio <= 0 || t.onMaxDurationTimeout == nil {
+		return
+	}
+	if _, ok := f.(*frames.AudioRawFrame); !ok {
+		return
+	}
+	t.maxDurationOnce.Do(func() {
+		dur := t.maxDurationAfterFirstAudio
+		cb := t.onMaxDurationTimeout
+		// One-shot timer: when it fires, close/cancel will be handled by the
+		// callback, and Close() will stop future reads/writes.
+		time.AfterFunc(dur, func() {
+			select {
+			case <-t.closed:
+				return
+			default:
+			}
+			if cb != nil {
+				cb()
+			}
+		})
+	})
 }
 
 func (t *ConnTransport) writeLoop() {
@@ -385,6 +429,12 @@ type Server struct {
 	// WriteCoalesceMs when > 0 enables write coalescing on each ConnTransport (drain up to WriteCoalesceMaxFrames within this many ms).
 	WriteCoalesceMs     int
 	WriteCoalesceMaxFrames int
+
+	// MaxDurationAfterFirstAudio when > 0 starts a one-shot max-duration
+	// timer on each connection after the first inbound *frames.AudioRawFrame.
+	// When the timer fires, the per-connection context is canceled, which
+	// terminates the transport and associated pipeline session.
+	MaxDurationAfterFirstAudio time.Duration
 }
 
 // ListenAndServe starts the HTTP server and blocks until ctx is canceled.
@@ -407,17 +457,28 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			}
 		}
 		var opts *ConnTransportOptions
-		if s.WriteCoalesceMs > 0 {
-			opts = &ConnTransportOptions{WriteCoalesceMs: s.WriteCoalesceMs, WriteCoalesceMaxFrames: s.WriteCoalesceMaxFrames}
+		// Per-connection context so timers can cancel only this connection's session.
+		connCtx, cancelConn := context.WithCancel(ctx)
+		if s.WriteCoalesceMs > 0 || s.MaxDurationAfterFirstAudio > 0 {
+			opts = &ConnTransportOptions{
+				WriteCoalesceMs:           s.WriteCoalesceMs,
+				WriteCoalesceMaxFrames:   s.WriteCoalesceMaxFrames,
+				MaxDurationAfterFirstAudio: s.MaxDurationAfterFirstAudio,
+				OnMaxDurationTimeout:     cancelConn,
+			}
 		}
 		tr := NewConnTransport(conn, 64, 64, ser, opts)
+		go func() {
+			<-tr.Done()
+			cancelConn()
+		}()
 		// Start monitoring this connection for inactivity if a session timeout
 		// has been configured.
 		if s.SessionTimeout > 0 {
-			go s.monitorSession(ctx, tr, s.SessionTimeout)
+			go s.monitorSession(connCtx, tr, s.SessionTimeout)
 		}
 		if s.OnConn != nil {
-			go s.OnConn(ctx, tr)
+			go s.OnConn(connCtx, tr)
 		}
 	})
 	if s.RegisterHandlers != nil {
@@ -507,15 +568,26 @@ func (s *Server) ServeWithListener(ctx context.Context, listener net.Listener) e
 			}
 		}
 		var opts *ConnTransportOptions
-		if s.WriteCoalesceMs > 0 {
-			opts = &ConnTransportOptions{WriteCoalesceMs: s.WriteCoalesceMs, WriteCoalesceMaxFrames: s.WriteCoalesceMaxFrames}
+		connCtx, cancelConn := context.WithCancel(ctx)
+		var tr *ConnTransport
+		if s.WriteCoalesceMs > 0 || s.MaxDurationAfterFirstAudio > 0 {
+			opts = &ConnTransportOptions{
+				WriteCoalesceMs:           s.WriteCoalesceMs,
+				WriteCoalesceMaxFrames:   s.WriteCoalesceMaxFrames,
+				MaxDurationAfterFirstAudio: s.MaxDurationAfterFirstAudio,
+				OnMaxDurationTimeout:     cancelConn,
+			}
 		}
-		tr := NewConnTransport(conn, 64, 64, ser, opts)
+		tr = NewConnTransport(conn, 64, 64, ser, opts)
+		go func() {
+			<-tr.Done()
+			cancelConn()
+		}()
 		if s.SessionTimeout > 0 {
-			go s.monitorSession(ctx, tr, s.SessionTimeout)
+			go s.monitorSession(connCtx, tr, s.SessionTimeout)
 		}
 		if s.OnConn != nil {
-			go s.OnConn(ctx, tr)
+			go s.OnConn(connCtx, tr)
 		}
 	})
 	if s.RegisterHandlers != nil {

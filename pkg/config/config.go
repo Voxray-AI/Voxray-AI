@@ -36,6 +36,11 @@ type Config struct {
 	// When empty, a sensible default STUN server is used.
 	WebRTCICEServers []string `json:"webrtc_ice_servers,omitempty"`
 
+	// RTCMaxDurationSecs enforces a maximum lifetime for RTC connections (WebRTC and/or
+	// WebSocket voice sessions) after the first inbound audio is observed.
+	// 0 or negative disables the enforcement.
+	RTCMaxDurationSecs float64 `json:"rtc_max_duration_secs,omitempty"`
+
 	// Turn detection: when to consider user finished speaking
 	TurnDetection       string  `json:"turn_detection,omitempty"`         // "none" | "silence"; default "none"
 	TurnStopSecs        float64 `json:"turn_stop_secs,omitempty"`         // silence after speech to end turn (default 3)
@@ -402,6 +407,11 @@ func ApplyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("VOXRAY_WS_WRITE_COALESCE_MAX_FRAMES"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.WSWriteCoalesceMaxFrames = n
+		}
+	}
+	if v := os.Getenv("VOXRAY_RTC_MAX_DURATION_SECS"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.RTCMaxDurationSecs = f
 		}
 	}
 	if v := os.Getenv("VOXRAY_VAD_BATCH_SIZE"); v != "" {

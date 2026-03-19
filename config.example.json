@@ -17,6 +17,7 @@
     "stun:stun.l.google.com:19302",
     "stun:openrelay.metered.ca:80"
   ],
+  "rtc_max_duration_secs": 0,
   "plugins": ["echo"],
   "plugin_options": {
     "frame_filter": {
