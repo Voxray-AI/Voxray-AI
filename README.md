@@ -554,6 +554,7 @@ The OpenAPI spec is generated from the codebase (`make swagger`); Swagger UI is 
 ## License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
+Attribution details for distribution are provided in [NOTICE](NOTICE).
 
 ---
 
